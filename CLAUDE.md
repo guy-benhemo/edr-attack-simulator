@@ -33,3 +33,24 @@ This is a **Tauri 2 + React 19 + TypeScript** desktop application.
 **Permissions** (`src-tauri/capabilities/default.json`): Controls what APIs the frontend window can access. New Tauri plugins require adding their permission here.
 
 **Dev server port**: Fixed at `1420` (required by Tauri's `devUrl` config in `tauri.conf.json`).
+
+### Testing
+
+- Test framework: Vitest + @testing-library/react, configured in `vitest.config.ts`
+- Test files live in `tests/`, setup file at `tests/setup.ts` (imports `@testing-library/jest-dom/vitest`)
+- Call `cleanup()` in `afterEach` to prevent DOM bleed between tests
+- Mock `XMLHttpRequest` via `vi.stubGlobal` for components that use XHR
+
+### Code Style
+
+- Do not add new comments when editing existing code
+
+### Styling
+
+- Tailwind CSS 4 via `@import "tailwindcss"` in `src/styles/globals.css`
+- Prettier formats Tailwind class order via `prettier-plugin-tailwindcss`
+
+## Checking Documention
+
+- **important** When implementing any lib/framework-specific features, ALWAYS check the approrpiate lib/framework
+  documention using the Context7 MCP sever before writing any code.

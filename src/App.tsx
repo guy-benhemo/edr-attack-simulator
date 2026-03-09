@@ -13,10 +13,10 @@ function App() {
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <main className="flex flex-col items-center justify-start pt-[10vh] text-center">
+      <h1 className="text-3xl font-bold mb-4">Welcome to Tauri + React</h1>
 
-      <div className="row">
+      <div className="flex justify-center">
         <a href="https://vite.dev" target="_blank">
           <img src="/vite.svg" className="logo vite" alt="Vite logo" />
         </a>
@@ -27,10 +27,10 @@ function App() {
           <img src={reactLogo} className="logo react" alt="React logo" />
         </a>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+      <p className="my-4">Click on the Tauri, Vite, and React logos to learn more.</p>
 
       <form
-        className="row"
+        className="flex justify-center gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           greet();
@@ -40,10 +40,16 @@ function App() {
           id="greet-input"
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Enter a name..."
+          className="rounded-lg border border-transparent px-5 py-2 text-base font-medium bg-white text-gray-900 shadow-sm outline-none transition-colors focus:border-blue-500 dark:bg-black/60 dark:text-white"
         />
-        <button type="submit">Greet</button>
+        <button
+          type="submit"
+          className="rounded-lg border border-transparent px-5 py-2 text-base font-medium bg-white text-gray-900 shadow-sm cursor-pointer outline-none transition-colors hover:border-blue-500 active:border-blue-500 active:bg-gray-200 dark:bg-black/60 dark:text-white dark:active:bg-black/40"
+        >
+          Greet
+        </button>
       </form>
-      <p>{greetMsg}</p>
+      <p className="mt-4">{greetMsg}</p>
     </main>
   );
 }

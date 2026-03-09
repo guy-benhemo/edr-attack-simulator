@@ -34,13 +34,6 @@ This is a **Tauri 2 + React 19 + TypeScript** desktop application.
 
 **Dev server port**: Fixed at `1420` (required by Tauri's `devUrl` config in `tauri.conf.json`).
 
-### Testing
-
-- Test framework: Vitest + @testing-library/react, configured in `vitest.config.ts`
-- Test files live in `tests/`, setup file at `tests/setup.ts` (imports `@testing-library/jest-dom/vitest`)
-- Call `cleanup()` in `afterEach` to prevent DOM bleed between tests
-- Mock `XMLHttpRequest` via `vi.stubGlobal` for components that use XHR
-
 ### Code Style
 
 - Do not add new comments when editing existing code

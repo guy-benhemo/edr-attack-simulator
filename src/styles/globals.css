@@ -1,0 +1,9 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/red-hat-display";
+@import "tailwindcss";
+
+@theme {
+  --default-font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Red Hat Display Variable", ui-sans-serif, system-ui, sans-serif;
+}

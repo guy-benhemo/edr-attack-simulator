@@ -1,7 +1,6 @@
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import "./styles/globals.css";
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
@@ -14,20 +13,19 @@ function App() {
 
   return (
     <main className="flex flex-col items-center justify-start pt-[10vh] text-center">
-      <h1 className="text-3xl font-bold mb-4">Welcome to Tauri + React</h1>
+      <h1 className="font-display text-5xl font-bold mb-4">Built To Solve Real-World
+      MSP Challenges</h1>
+      <p className="font-sans text-lg mb-4">This is a test application for the Guardz S1 Emulation App.</p>
 
       <div className="flex justify-center">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
+        <a href="https://guardz.com" target="_blank">
+          <img src="/icon.svg" className="logo guardz" alt="Guardz logo" />
         </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
+        <a href="https://guardz.com" target="_blank">
+          <img src="/logo.svg" className="logo guardz" alt="Guardz logo" />
         </a>
       </div>
-      <p className="my-4">Click on the Tauri, Vite, and React logos to learn more.</p>
+      <p className="my-4">Click on the Guardz logo to visit our website.</p>
 
       <form
         className="flex justify-center gap-2"

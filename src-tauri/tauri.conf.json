@@ -12,9 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "s1-emulation-app",
-        "width": 800,
-        "height": 600
+        "title": "Guardz S1 Detection Demo",
+        "width": 1280,
+        "height": 900,
+        "resizable": true
       }
     ],
     "security": {

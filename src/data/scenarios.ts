@@ -37,7 +37,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     id: "reverse-shell",
     name: "Reverse Shell (TCP)",
     description:
-      "Opens a TCP connection to a non-routable address simulating a C2 callback, immediately aborted.",
+      "Opens a TCP socket with StreamReader/Writer and Invoke-Expression, simulating a real C2 callback pattern.",
     category: "Exfiltration",
     status: "ready",
   },
@@ -74,10 +74,10 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     status: "ready",
   },
   {
-    id: "keylogger-sim",
-    name: "Keylogger Simulation",
+    id: "bloodhound-recon",
+    name: "BloodHound AD Recon",
     description:
-      "Calls GetAsyncKeyState via P/Invoke in a short loop, simulating keyboard API access patterns.",
+      "Emulates BloodHound execution with Invoke-BloodHound -CollectionMethod All, triggering AD reconnaissance detection.",
     category: "Reconnaissance",
     status: "ready",
   },

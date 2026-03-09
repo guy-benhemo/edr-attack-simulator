@@ -21,6 +21,9 @@ export interface Scenario {
   category: ThreatCategory;
   status: ScenarioStatus;
   message?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
   lastRunAt?: string;
 }
 
@@ -28,5 +31,8 @@ export interface ExecutionResult {
   scenarioId: string;
   status: "blocked" | "completed" | "failed";
   message: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
   durationMs: number;
 }

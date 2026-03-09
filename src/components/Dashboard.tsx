@@ -25,6 +25,9 @@ export default function Dashboard() {
                 ...s,
                 status: result.status,
                 message: result.message,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                exitCode: result.exitCode,
                 lastRunAt: new Date().toISOString(),
               }
             : s,

@@ -43,8 +43,25 @@ export default function ScenarioCard({
       </div>
 
       {scenario.message && (
-        <div className="rounded-lg bg-black/30 px-3 py-2 text-xs text-guardz-light-gray">
-          {scenario.message}
+        <div className="flex flex-col gap-1 rounded-lg bg-black/30 px-3 py-2 text-xs">
+          <div className="text-guardz-light-gray">{scenario.message}</div>
+          {scenario.exitCode !== undefined && (
+            <div className="text-guardz-medium-gray">
+              Exit code: {scenario.exitCode}
+            </div>
+          )}
+          {scenario.stdout && (
+            <div className="text-guardz-medium-gray">
+              <span className="text-guardz-green">stdout:</span>{" "}
+              {scenario.stdout.slice(0, 300)}
+            </div>
+          )}
+          {scenario.stderr && (
+            <div className="text-guardz-medium-gray">
+              <span className="text-guardz-pink">stderr:</span>{" "}
+              {scenario.stderr.slice(0, 300)}
+            </div>
+          )}
         </div>
       )}
     </div>

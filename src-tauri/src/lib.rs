@@ -1,5 +1,7 @@
 use serde::Serialize;
 use std::time::Instant;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

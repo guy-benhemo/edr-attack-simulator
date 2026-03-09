@@ -6,4 +6,113 @@
   --default-font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Red Hat Display Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* Guardz Primary Colors */
+  --color-guardz-purple: #654fe8;
+  --color-guardz-green: #4fe882;
+
+  /* Guardz Secondary Colors */
+  --color-guardz-dark-purple: #2f2472;
+  --color-guardz-dark-gray: #363844;
+  --color-guardz-medium-gray: #686a73;
+  --color-guardz-light-gray: #b9b9be;
+  --color-guardz-cream: #eae8dc;
+  --color-guardz-teal-green: #00aa67;
+  --color-guardz-bright-green: #00d782;
+  --color-guardz-mint-green: #40feae;
+  --color-guardz-light-purple: #a289fc;
+  --color-guardz-lavender: #f1edff;
+  --color-guardz-off-white: #faf9f6;
+  --color-guardz-dark-red: #b0284f;
+  --color-guardz-pink: #fc5281;
+}
+
+/* Guardz Typography Scale */
+
+@utility text-headline-01 {
+  font-family: var(--font-display);
+  font-size: 64px;
+  line-height: 80px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-headline-02 {
+  font-family: var(--font-display);
+  font-size: 48px;
+  line-height: 72px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-headline-03 {
+  font-family: var(--font-display);
+  font-size: 40px;
+  line-height: 64px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-headline-04 {
+  font-family: var(--font-display);
+  font-size: 32px;
+  line-height: 48px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-headline-05 {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 44px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+@utility text-headline-06 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 40px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-headline-07 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-headline-08 {
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-body-01 {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  line-height: 32px;
+  font-weight: 400;
+  letter-spacing: 1px;
+}
+
+@utility text-body-02 {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 30px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+@utility text-body-03 {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }

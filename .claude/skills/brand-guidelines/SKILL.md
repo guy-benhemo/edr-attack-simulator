@@ -58,8 +58,8 @@ UI, design, and marketing work stays consistent with the brand.
 
 ### Typography
 
-**Display font** (headings, hero text): `Red Hat Display` — Bold, Medium, Regular
-**Running text** (body, UI labels): `Inter` — Bold, Medium, Regular
+**Display font** (headings, hero text): `Red Hat Display`
+**Running text** (body, UI labels): `Inter`
 
 Both fonts are already configured in the project:
 - CSS variable `--font-display` → Red Hat Display
@@ -68,6 +68,27 @@ Both fonts are already configured in the project:
 **Tailwind usage:**
 - `font-display` for headings
 - `font-sans` (default) for body text
+
+**Display — Red Hat Display (headings, hero text, important information):**
+
+| Level       | Weight | Size  | Line Height | Letter Spacing |
+|-------------|--------|-------|-------------|----------------|
+| Headline 01 | Bold   | 64px  | 80px        | 1px            |
+| Headline 02 | Bold   | 48px  | 72px        | 1px            |
+| Headline 03 | Bold   | 40px  | 64px        | 1px            |
+| Headline 04 | Bold   | 32px  | 48px        | 1px            |
+| Headline 05 | Bold   | 26px  | 44px        | 0.5px          |
+| Headline 06 | Bold   | 22px  | 40px        | 1px            |
+| Headline 07 | Bold   | 20px  | 32px        | 1px            |
+| Headline 08 | Bold   | 16px  | 28px        | 1px            |
+
+**Running text — Inter (body copy, UI labels, long-form content):**
+
+| Level   | Weight  | Size  | Line Height | Letter Spacing |
+|---------|---------|-------|-------------|----------------|
+| Body 01 | Regular | 20px  | 32px        | 1px            |
+| Body 02 | Bold    | 18px  | 30px        | 1px            |
+| Body 03 | Bold    | 16px  | 26px        | 1px            |
 
 **Rules:**
 - Use Title Case for headlines

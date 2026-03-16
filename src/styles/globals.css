@@ -23,8 +23,6 @@
   --color-guardz-light-purple: #a289fc;
   --color-guardz-lavender: #f1edff;
   --color-guardz-off-white: #faf9f6;
-  --color-guardz-amber: #f59e0b;
-  --color-guardz-dark-amber: #b45309;
   --color-guardz-dark-red: #b0284f;
   --color-guardz-pink: #fc5281;
 }
@@ -117,4 +115,51 @@
   line-height: 26px;
   font-weight: 700;
   letter-spacing: 1px;
+}
+
+@keyframes scan-line {
+  0% { transform: translateX(-100%); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.6); }
+}
+
+@keyframes verdict-reveal {
+  0% { opacity: 0; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ring-fill {
+  from { stroke-dashoffset: var(--ring-circumference); }
+  to { stroke-dashoffset: var(--ring-offset); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@utility animate-scan-line {
+  animation: scan-line 2s ease-in-out infinite;
+}
+
+@utility animate-dot-pulse {
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+
+@utility animate-verdict {
+  animation: verdict-reveal 0.4s ease-out forwards;
+}
+
+@utility animate-ring {
+  animation: ring-fill 1.2s ease-out forwards;
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
 }

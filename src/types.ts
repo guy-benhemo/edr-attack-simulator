@@ -15,9 +15,15 @@ export type ThreatCategory =
   | "LOLBin"
   | "Credential Access";
 
+export type AppPhase = "welcome" | "selecting" | "executing" | "results";
+
+export type DetectionVerdict = "detected" | "not_detected" | "pending";
+
 export interface Scenario {
   id: string;
   name: string;
+  shortName: string;
+  question: string;
   description: string;
   category: ThreatCategory;
   status: ScenarioStatus;
@@ -25,6 +31,7 @@ export interface Scenario {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
+  durationMs?: number;
   lastRunAt?: string;
 }
 

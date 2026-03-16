@@ -1,10 +1,10 @@
 import "./styles/globals.css";
-import Dashboard from "./components/Dashboard";
+import AppShell from "./components/AppShell";
 
 function App() {
   return (
     <main className="min-h-screen bg-[#12131a]">
-      <Dashboard />
+      <AppShell />
     </main>
   );
 }

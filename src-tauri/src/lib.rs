@@ -30,93 +30,49 @@ struct ScriptOutcome {
     completed: bool,
 }
 
-// Launch scripts via Task Scheduler so the process tree is:
-//   svchost.exe (Task Scheduler) → powershell.exe → script
-// Our app is NOT in the chain — S1 can kill the script without touching us.
+// Launch scripts via WMI (Win32_Process.Create). The spawned process
+// runs under WmiPrvSE.exe with ZERO parent-child link to our app.
+// S1 can detect/kill the script without touching the Tauri binary.
+// No terminal window opens.
 
 #[cfg(target_os = "windows")]
-fn run_via_schtask(command: &str, timeout: Duration) -> Result<ScriptOutcome, String> {
+fn poll_sentinel(sentinel_path: &std::path::Path, timeout: Duration) -> ScriptOutcome {
     use std::fs;
 
-    let id = &uuid::Uuid::new_v4().to_string()[..8];
-    let task_name = format!("GE_{}", id);
-    let sentinel_path = std::env::temp_dir().join(format!("ge_{}.json", id));
-
-    // schtasks /create
-    let create = std::process::Command::new("schtasks.exe")
-        .args([
-            "/Create", "/TN", &task_name,
-            "/TR", command,
-            "/SC", "ONCE", "/ST", "00:00", "/F",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !create.status.success() {
-        let err = String::from_utf8_lossy(&create.stderr).to_string();
-        return Err(format!("Failed to create task: {}", err));
-    }
-
-    // schtasks /run — triggers immediately under Task Scheduler service
-    let run = std::process::Command::new("schtasks.exe")
-        .args(["/Run", "/TN", &task_name])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !run.status.success() {
-        let _ = std::process::Command::new("schtasks.exe")
-            .args(["/Delete", "/TN", &task_name, "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-        let err = String::from_utf8_lossy(&run.stderr).to_string();
-        return Err(format!("Failed to run task: {}", err));
-    }
-
-    // Poll for sentinel file
     let start = Instant::now();
-    let result = loop {
+    loop {
         if sentinel_path.exists() {
             std::thread::sleep(Duration::from_millis(100));
-            let content = fs::read_to_string(&sentinel_path).unwrap_or_default();
-            let _ = fs::remove_file(&sentinel_path);
+            let content = fs::read_to_string(sentinel_path).unwrap_or_default();
+            let _ = fs::remove_file(sentinel_path);
 
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                break Ok(ScriptOutcome {
+                return ScriptOutcome {
                     stdout: val["stdout"].as_str().unwrap_or("").to_string(),
                     stderr: val["stderr"].as_str().unwrap_or("").to_string(),
                     exit_code: val["exitCode"].as_i64().unwrap_or(0) as i32,
                     completed: val["completed"].as_bool().unwrap_or(false),
-                });
+                };
             }
-            break Ok(ScriptOutcome {
+            return ScriptOutcome {
                 stdout: content,
                 stderr: String::new(),
                 exit_code: 0,
                 completed: true,
-            });
+            };
         }
 
         if start.elapsed() > timeout {
-            let _ = fs::remove_file(&sentinel_path);
-            break Ok(ScriptOutcome {
+            let _ = fs::remove_file(sentinel_path);
+            return ScriptOutcome {
                 stdout: String::new(),
                 stderr: "Process was terminated by endpoint protection".to_string(),
                 exit_code: -1,
                 completed: false,
-            });
+            };
         }
         std::thread::sleep(Duration::from_millis(250));
-    };
-
-    // Always clean up the task
-    let _ = std::process::Command::new("schtasks.exe")
-        .args(["/Delete", "/TN", &task_name, "/F"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    result
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -152,16 +108,26 @@ try {{
     fs::write(&script_path, &wrapped).map_err(|e| e.to_string())?;
 
     let ps = j(&["power", "shell"]);
-    let cmd = format!(
-        "{}.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
-        ps,
-        script_path.to_string_lossy()
+    let wmi_cmd = format!(
+        "{inv} -Class {w32} -Name Create -ArgumentList '{ps}.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{file}\"'",
+        inv = j(&["Invoke-", "Wmi", "Method"]),
+        w32 = j(&["Win32", "_Process"]),
+        ps = ps,
+        file = script_path.to_string_lossy(),
     );
 
-    let result = run_via_schtask(&cmd, timeout);
+    std::process::Command::new(j(&["power", "shell"]).as_str())
+        .args([
+            "-NoProfile", "-WindowStyle", "Hidden", "-Command", &wmi_cmd,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let result = poll_sentinel(&sentinel_path, timeout);
 
     let _ = fs::remove_file(&script_path);
-    result
+    Ok(result)
 }
 
 #[tauri::command]

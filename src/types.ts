@@ -17,8 +17,6 @@ export type ThreatCategory =
 
 export type AppPhase = "welcome" | "selecting" | "executing" | "results";
 
-export type DetectionVerdict = "detected" | "not_detected" | "pending";
-
 export interface Scenario {
   id: string;
   name: string;

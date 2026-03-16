@@ -1,5 +1,5 @@
 import { Scenario } from "../types";
-import { getVerdict } from "../utils/verdict";
+import { getOutcome } from "../utils/verdict";
 import ScoreRing from "./ScoreRing";
 import ResultRow from "./ResultRow";
 
@@ -19,23 +19,31 @@ export default function ResultsScreen({
   const ranScenarios = runQueue.map(
     (id) => scenarios.find((s) => s.id === id)!,
   );
-  const detected = ranScenarios.filter(
-    (s) => getVerdict(s.status) === "detected",
+  const executed = ranScenarios.filter(
+    (s) => getOutcome(s.status) === "executed",
+  ).length;
+  const stopped = ranScenarios.filter(
+    (s) => getOutcome(s.status) === "stopped",
   ).length;
   const total = ranScenarios.length;
 
   return (
     <div className="flex h-screen flex-col">
       <div className="flex shrink-0 flex-col items-center gap-6 border-b border-white/10 px-8 py-10 animate-fade-in">
-        <ScoreRing detected={detected} total={total} />
-        <div className="flex flex-col items-center gap-1">
+        <ScoreRing executed={executed} total={total} />
+        <div className="flex flex-col items-center gap-2">
           <h2 className="text-headline-04 text-white">
-            {detected}/{total} Threats Detected
+            {executed}/{total} Scenarios Executed
           </h2>
-          <p className="text-sm text-guardz-medium-gray">
-            {detected === total
-              ? "All simulated attacks were successfully detected."
-              : `${total - detected} simulated attack${total - detected > 1 ? "s" : ""} went undetected.`}
+          {stopped > 0 && (
+            <p className="text-sm text-guardz-light-purple">
+              {stopped} scenario{stopped > 1 ? "s" : ""} stopped by endpoint
+              protection
+            </p>
+          )}
+          <p className="mt-1 max-w-md text-center text-xs text-guardz-medium-gray">
+            Check your SentinelOne console to verify which attacks were detected
+            and logged.
           </p>
         </div>
         <div className="flex gap-3">

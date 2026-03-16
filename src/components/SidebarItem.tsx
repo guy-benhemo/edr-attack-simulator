@@ -1,5 +1,5 @@
 import { Scenario } from "../types";
-import { getVerdict } from "../utils/verdict";
+import { getOutcome } from "../utils/verdict";
 
 interface SidebarItemProps {
   scenario: Scenario;
@@ -14,8 +14,7 @@ export default function SidebarItem({
   isActive,
   isPast,
 }: SidebarItemProps) {
-  const verdict = isPast ? getVerdict(scenario.status) : "pending";
-  const isDetected = verdict === "detected";
+  const outcome = isPast ? getOutcome(scenario.status) : "pending";
 
   return (
     <div
@@ -28,15 +27,17 @@ export default function SidebarItem({
       <div
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
           isPast
-            ? isDetected
+            ? outcome === "executed"
               ? "bg-guardz-green/20 text-guardz-green"
-              : "bg-guardz-pink/20 text-guardz-pink"
+              : outcome === "stopped"
+                ? "bg-guardz-light-purple/20 text-guardz-light-purple"
+                : "bg-guardz-pink/20 text-guardz-pink"
             : isActive
               ? "bg-guardz-purple/20 text-guardz-light-purple"
               : "bg-white/5 text-guardz-medium-gray"
         }`}
       >
-        {isPast ? (isDetected ? "✓" : "✕") : index + 1}
+        {isPast ? (outcome === "executed" ? "✓" : outcome === "stopped" ? "⊘" : "✕") : index + 1}
       </div>
 
       <span
@@ -56,9 +57,15 @@ export default function SidebarItem({
       )}
       {isPast && (
         <span
-          className={`text-xs font-medium ${isDetected ? "text-guardz-green" : "text-guardz-pink"}`}
+          className={`text-xs font-medium ${
+            outcome === "executed"
+              ? "text-guardz-green"
+              : outcome === "stopped"
+                ? "text-guardz-light-purple"
+                : "text-guardz-pink"
+          }`}
         >
-          {isDetected ? "Detected" : "Missed"}
+          {outcome === "executed" ? "Ran" : outcome === "stopped" ? "Stopped" : "Error"}
         </span>
       )}
     </div>

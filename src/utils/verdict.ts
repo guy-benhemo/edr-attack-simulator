@@ -1,7 +1,10 @@
-import { ScenarioStatus, DetectionVerdict } from "../types";
+import { ScenarioStatus } from "../types";
 
-export function getVerdict(status: ScenarioStatus): DetectionVerdict {
-  if (status === "blocked" || status === "mitigated") return "detected";
-  if (status === "completed" || status === "failed") return "not_detected";
+export type RunOutcome = "executed" | "stopped" | "error" | "pending";
+
+export function getOutcome(status: ScenarioStatus): RunOutcome {
+  if (status === "completed") return "executed";
+  if (status === "blocked" || status === "mitigated") return "stopped";
+  if (status === "failed") return "error";
   return "pending";
 }

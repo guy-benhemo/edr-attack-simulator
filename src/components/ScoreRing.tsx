@@ -1,13 +1,13 @@
 interface ScoreRingProps {
-  detected: number;
+  executed: number;
   total: number;
 }
 
-export default function ScoreRing({ detected, total }: ScoreRingProps) {
+export default function ScoreRing({ executed, total }: ScoreRingProps) {
   const radius = 70;
   const stroke = 8;
   const circumference = 2 * Math.PI * radius;
-  const ratio = total > 0 ? detected / total : 0;
+  const ratio = total > 0 ? executed / total : 0;
   const offset = circumference * (1 - ratio);
   const size = (radius + stroke) * 2;
 
@@ -46,7 +46,7 @@ export default function ScoreRing({ detected, total }: ScoreRingProps) {
       </svg>
       <div className="absolute flex flex-col items-center">
         <span className="text-headline-03 text-white">
-          {detected}/{total}
+          {executed}/{total}
         </span>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Scenario } from "../types";
-import { getVerdict } from "../utils/verdict";
+import { getOutcome } from "../utils/verdict";
 
 interface ResultRowProps {
   scenario: Scenario;
@@ -9,8 +9,14 @@ interface ResultRowProps {
 
 export default function ResultRow({ scenario, index }: ResultRowProps) {
   const [expanded, setExpanded] = useState(false);
-  const verdict = getVerdict(scenario.status);
-  const isDetected = verdict === "detected";
+  const outcome = getOutcome(scenario.status);
+
+  const badgeConfig = {
+    executed: { label: "Executed", style: "bg-guardz-green/15 text-guardz-green" },
+    stopped: { label: "Stopped", style: "bg-guardz-light-purple/15 text-guardz-light-purple" },
+    error: { label: "Error", style: "bg-guardz-pink/15 text-guardz-pink" },
+    pending: { label: "Pending", style: "bg-white/10 text-white/50" },
+  }[outcome];
 
   return (
     <div className="border-b border-white/5 last:border-b-0">
@@ -30,13 +36,9 @@ export default function ResultRow({ scenario, index }: ResultRowProps) {
           </span>
         </div>
         <span
-          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-            isDetected
-              ? "bg-guardz-green/15 text-guardz-green"
-              : "bg-guardz-pink/15 text-guardz-pink"
-          }`}
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${badgeConfig.style}`}
         >
-          {isDetected ? "Detected" : "Not Detected"}
+          {badgeConfig.label}
         </span>
         <svg
           className={`h-4 w-4 text-guardz-medium-gray transition-transform ${expanded ? "rotate-180" : ""}`}

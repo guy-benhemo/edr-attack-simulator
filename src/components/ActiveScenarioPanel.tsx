@@ -1,5 +1,5 @@
 import { Scenario } from "../types";
-import { getVerdict } from "../utils/verdict";
+import { getOutcome } from "../utils/verdict";
 
 interface ActiveScenarioPanelProps {
   scenario: Scenario;
@@ -13,8 +13,8 @@ export default function ActiveScenarioPanel({
   total,
 }: ActiveScenarioPanelProps) {
   const isRunning = scenario.status === "executing";
-  const verdict = getVerdict(scenario.status);
-  const showVerdict = verdict !== "pending" && !isRunning;
+  const outcome = getOutcome(scenario.status);
+  const showResult = outcome !== "pending" && !isRunning;
 
   return (
     <div className="flex max-w-xl flex-col items-center gap-8 px-8 text-center animate-fade-in">
@@ -39,33 +39,43 @@ export default function ActiveScenarioPanel({
         </div>
       )}
 
-      {showVerdict && (
+      {showResult && (
         <div className="flex flex-col items-center gap-3 animate-verdict">
           <div
             className={`flex h-16 w-16 items-center justify-center rounded-full ${
-              verdict === "detected"
+              outcome === "executed"
                 ? "bg-guardz-green/15"
-                : "bg-guardz-pink/15"
+                : outcome === "stopped"
+                  ? "bg-guardz-light-purple/15"
+                  : "bg-guardz-pink/15"
             }`}
           >
             <span
               className={`text-2xl ${
-                verdict === "detected"
+                outcome === "executed"
                   ? "text-guardz-green"
-                  : "text-guardz-pink"
+                  : outcome === "stopped"
+                    ? "text-guardz-light-purple"
+                    : "text-guardz-pink"
               }`}
             >
-              {verdict === "detected" ? "✓" : "✕"}
+              {outcome === "executed" ? "✓" : outcome === "stopped" ? "⊘" : "✕"}
             </span>
           </div>
           <span
             className={`text-headline-05 font-bold tracking-wider ${
-              verdict === "detected"
+              outcome === "executed"
                 ? "text-guardz-green"
-                : "text-guardz-pink"
+                : outcome === "stopped"
+                  ? "text-guardz-light-purple"
+                  : "text-guardz-pink"
             }`}
           >
-            {verdict === "detected" ? "DETECTED" : "NOT DETECTED"}
+            {outcome === "executed"
+              ? "EXECUTED"
+              : outcome === "stopped"
+                ? "STOPPED"
+                : "ERROR"}
           </span>
           {scenario.durationMs !== undefined && (
             <span className="text-xs text-guardz-medium-gray">

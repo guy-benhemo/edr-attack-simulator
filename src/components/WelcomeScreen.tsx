@@ -10,10 +10,8 @@ export default function WelcomeScreen({
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-8 px-8">
       <div className="flex flex-col items-center gap-4">
-        <img src="/logo.svg" alt="Guardz" className="h-16 w-16" />
-        <h1 className="text-headline-03 text-white">
-          S1 Detection Validation
-        </h1>
+        <img src="/logo.svg" alt="Guardz" className="h-16 w-48" />
+        <h1 className="text-headline-03 text-white">S1 Detection Validation</h1>
         <p className="max-w-lg text-center text-body-03 font-normal text-guardz-light-gray">
           Validate your SentinelOne endpoint protection by running safe,
           simulated attack scenarios.
@@ -29,7 +27,7 @@ export default function WelcomeScreen({
         </button>
         <button
           onClick={onSelectIndividual}
-          className="cursor-pointer text-sm text-guardz-light-purple transition-colors hover:text-guardz-lavender hover:underline"
+          className="cursor-pointer text-sm text-guardz-green transition-colors hover:text-guardz-lavender hover:underline"
         >
           Or select individual tests
         </button>

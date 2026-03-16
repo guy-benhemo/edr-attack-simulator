@@ -10,7 +10,7 @@ export default function WelcomeScreen({
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-8 px-8">
       <div className="flex flex-col items-center gap-4">
-        <img src="/logo.png" alt="Guardz" className="h-16 w-48" />
+        <img src="/logo.png" alt="Guardz" className="h-8" />
         <h1 className="text-headline-03 text-white">S1 Detection Validation</h1>
         <p className="max-w-lg text-center text-body-03 font-normal text-guardz-light-gray">
           Validate your SentinelOne endpoint protection by running safe,

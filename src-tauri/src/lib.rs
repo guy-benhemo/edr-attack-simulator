@@ -86,22 +86,18 @@ fn launch_runner() -> Result<(), String> {
         let results = results_dir();
         let manifest = work.join("manifest.json");
 
-        let ps_cmd = format!(
-            "& '{}' -ScriptsDir '{}' -ResultsDir '{}' -ManifestPath '{}'",
-            runner.to_string_lossy(),
-            scripts.to_string_lossy(),
-            results.to_string_lossy(),
-            manifest.to_string_lossy(),
+        let vbs_path = work.join("launcher.vbs");
+        let vbs_content = format!(
+            "CreateObject(\"WScript.Shell\").Run \"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"\"{}\"\" -ScriptsDir \"\"{}\"\" -ResultsDir \"\"{}\"\" -ManifestPath \"\"{}\"\"\", 0, False",
+            runner.to_string_lossy().replace('\\', "\\\\"),
+            scripts.to_string_lossy().replace('\\', "\\\\"),
+            results.to_string_lossy().replace('\\', "\\\\"),
+            manifest.to_string_lossy().replace('\\', "\\\\"),
         );
+        std::fs::write(&vbs_path, &vbs_content).map_err(|e| e.to_string())?;
 
-        std::process::Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-WindowStyle", "Hidden",
-                "-Command", &ps_cmd,
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
+        std::process::Command::new("explorer.exe")
+            .arg(&vbs_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }

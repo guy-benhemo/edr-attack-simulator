@@ -79,7 +79,7 @@ function reducer(state: AppState, action: Action): AppState {
           s.id === action.id
             ? {
                 ...s,
-                status: action.result.status,
+                status: action.result.status as Scenario["status"],
                 message: action.result.message,
                 stdout: action.result.stdout,
                 stderr: action.result.stderr,
@@ -100,6 +100,10 @@ function reducer(state: AppState, action: Action): AppState {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export default function AppShell() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const abortRef = useRef(false);
@@ -111,54 +115,92 @@ export default function AppShell() {
     };
   }, [state.phase]);
 
-  const runCurrentScenario = useCallback(async () => {
-    if (state.phase !== "executing") return;
-    if (state.currentIndex >= state.runQueue.length) {
+  const runScenarios = useCallback(async () => {
+    if (state.phase !== "executing" || state.runQueue.length === 0) return;
+    if (state.currentIndex !== 0) return;
+
+    try {
+      await invoke("prepare_scenarios", { scenarioIds: state.runQueue });
+      await invoke("launch_runner");
+    } catch (err) {
+      console.error("Failed to launch runner:", err);
       dispatch({ type: "SHOW_RESULTS" });
       return;
     }
 
-    const scenarioId = state.runQueue[state.currentIndex];
-    dispatch({ type: "SCENARIO_EXECUTING", id: scenarioId });
+    for (let i = 0; i < state.runQueue.length; i++) {
+      if (abortRef.current) return;
 
-    const minDelay = new Promise((r) => setTimeout(r, 800));
+      const scenarioId = state.runQueue[i];
+      dispatch({ type: "SCENARIO_EXECUTING", id: scenarioId });
 
-    try {
-      const [result] = await Promise.all([
-        invoke<ExecutionResult>("execute_scenario", { scenarioId }),
-        minDelay,
-      ]);
+      const startTime = Date.now();
+      let result: ExecutionResult | null = null;
+
+      while (!result) {
+        if (abortRef.current) return;
+
+        try {
+          result = await invoke<ExecutionResult | null>("poll_result", {
+            scenarioId,
+          });
+        } catch {
+          // poll failed, try again
+        }
+
+        if (!result) {
+          const isDone = await invoke<boolean>("check_runner_done");
+          if (isDone) {
+            result = {
+              scenarioId,
+              status: "mitigated",
+              message: "Script was terminated by endpoint protection",
+              stdout: "",
+              stderr: "",
+              exitCode: -1,
+              durationMs: Date.now() - startTime,
+            };
+            break;
+          }
+
+          if (Date.now() - startTime > 30000) {
+            result = {
+              scenarioId,
+              status: "mitigated",
+              message: "Timed out waiting for result",
+              stdout: "",
+              stderr: "",
+              exitCode: -1,
+              durationMs: 30000,
+            };
+            break;
+          }
+
+          await sleep(300);
+        }
+      }
+
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 800) {
+        await sleep(800 - elapsed);
+      }
 
       if (abortRef.current) return;
       dispatch({ type: "SCENARIO_COMPLETE", id: scenarioId, result });
 
-      await new Promise((r) => setTimeout(r, 1500));
-      if (abortRef.current) return;
-      dispatch({ type: "ADVANCE_NEXT" });
-    } catch (err) {
-      if (abortRef.current) return;
-      dispatch({
-        type: "SCENARIO_COMPLETE",
-        id: scenarioId,
-        result: {
-          scenarioId,
-          status: "failed",
-          message: String(err),
-          stdout: "",
-          stderr: "",
-          exitCode: -1,
-          durationMs: 0,
-        },
-      });
-      await new Promise((r) => setTimeout(r, 1500));
+      await sleep(1500);
       if (abortRef.current) return;
       dispatch({ type: "ADVANCE_NEXT" });
     }
-  }, [state.phase, state.currentIndex, state.runQueue]);
+
+    if (!abortRef.current) {
+      dispatch({ type: "SHOW_RESULTS" });
+    }
+  }, [state.phase, state.runQueue, state.currentIndex]);
 
   useEffect(() => {
-    runCurrentScenario();
-  }, [runCurrentScenario]);
+    runScenarios();
+  }, [runScenarios]);
 
   switch (state.phase) {
     case "welcome":

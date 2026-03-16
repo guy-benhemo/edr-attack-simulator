@@ -14,12 +14,6 @@ pub struct ExecutionResult {
     duration_ms: u64,
 }
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 fn work_dir() -> PathBuf {
     std::env::temp_dir().join("guardz_emu")
 }
@@ -28,43 +22,15 @@ fn results_dir() -> PathBuf {
     work_dir().join("results")
 }
 
-fn scripts_dir() -> PathBuf {
-    work_dir().join("scripts")
-}
-
 #[tauri::command]
-fn prepare_scenarios(
-    app: tauri::AppHandle,
-    scenario_ids: Vec<String>,
-) -> Result<(), String> {
+fn prepare_scenarios(scenario_ids: Vec<String>) -> Result<(), String> {
     use std::fs;
-    use tauri::Manager;
 
     let work = work_dir();
-    let scripts = scripts_dir();
     let results = results_dir();
 
     let _ = fs::remove_dir_all(&work);
-    fs::create_dir_all(&scripts).map_err(|e| e.to_string())?;
     fs::create_dir_all(&results).map_err(|e| e.to_string())?;
-
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("scripts");
-
-    for id in &scenario_ids {
-        let src = resource_path.join(format!("{}.ps1", id));
-        let dst = scripts.join(format!("{}.ps1", id));
-        if src.exists() {
-            fs::copy(&src, &dst).map_err(|e| e.to_string())?;
-        }
-    }
-
-    let runner_src = resource_path.join("runner.ps1");
-    let runner_dst = work.join("runner.ps1");
-    fs::copy(&runner_src, &runner_dst).map_err(|e| e.to_string())?;
 
     let manifest: Vec<serde_json::Value> = scenario_ids
         .iter()
@@ -77,33 +43,31 @@ fn prepare_scenarios(
 }
 
 #[tauri::command]
-fn launch_runner() -> Result<(), String> {
+fn launch_runner(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let work = work_dir();
-        let runner = work.join("runner.ps1");
-        let scripts = scripts_dir();
-        let results = results_dir();
-        let manifest = work.join("manifest.json");
+        use tauri::Manager;
 
-        let vbs_path = work.join("launcher.vbs");
-        let vbs_content = format!(
-            "CreateObject(\"WScript.Shell\").Run \"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"\"{}\"\" -ScriptsDir \"\"{}\"\" -ResultsDir \"\"{}\"\" -ManifestPath \"\"{}\"\"\", 0, False",
-            runner.to_string_lossy().replace('\\', "\\\\"),
-            scripts.to_string_lossy().replace('\\', "\\\\"),
-            results.to_string_lossy().replace('\\', "\\\\"),
-            manifest.to_string_lossy().replace('\\', "\\\\"),
-        );
-        std::fs::write(&vbs_path, &vbs_content).map_err(|e| e.to_string())?;
+        let launcher = app
+            .path()
+            .resource_dir()
+            .map_err(|e| e.to_string())?
+            .join("scripts")
+            .join("launcher.vbs");
+
+        if !launcher.exists() {
+            return Err(format!("Launcher not found: {}", launcher.display()));
+        }
 
         std::process::Command::new("explorer.exe")
-            .arg(&vbs_path)
+            .arg(launcher)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = app;
         spawn_mock_runner()?;
     }
 
@@ -145,8 +109,6 @@ fn reset_scenarios() -> Result<(), String> {
     let _ = std::fs::remove_dir_all(work_dir());
     Ok(())
 }
-
-// ── macOS mock runner for development ──
 
 #[cfg(not(target_os = "windows"))]
 fn spawn_mock_runner() -> Result<(), String> {

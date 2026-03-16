@@ -2,6 +2,7 @@ export type ScenarioStatus =
   | "ready"
   | "executing"
   | "blocked"
+  | "mitigated"
   | "completed"
   | "failed";
 
@@ -29,7 +30,7 @@ export interface Scenario {
 
 export interface ExecutionResult {
   scenarioId: string;
-  status: "blocked" | "completed" | "failed";
+  status: "blocked" | "mitigated" | "completed" | "failed";
   message: string;
   stdout: string;
   stderr: string;

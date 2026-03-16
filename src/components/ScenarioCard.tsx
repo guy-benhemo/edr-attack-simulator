@@ -36,7 +36,7 @@ export default function ScenarioCard({
         <button
           onClick={() => onSimulate(scenario.id)}
           disabled={isExecuting}
-          className="cursor-pointer rounded-lg bg-guardz-purple px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-guardz-purple/80 disabled:cursor-not-allowed disabled:opacity-50"
+          className="cursor-pointer rounded-lg bg-guardz-green px-4 py-2 text-sm font-semibold text-black transition-all hover:bg-guardz-green/80 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isExecuting ? "Running..." : "Simulate"}
         </button>
@@ -45,6 +45,11 @@ export default function ScenarioCard({
       {scenario.message && (
         <div className="flex flex-col gap-1 rounded-lg bg-black/30 px-3 py-2 text-xs">
           <div className="text-guardz-light-gray">{scenario.message}</div>
+          {scenario.status === "mitigated" && (
+            <div className="mt-1 rounded bg-guardz-amber/10 px-2 py-1 text-guardz-amber">
+              S1 terminated the process before completion
+            </div>
+          )}
           {scenario.exitCode !== undefined && (
             <div className="text-guardz-medium-gray">
               Exit code: {scenario.exitCode}

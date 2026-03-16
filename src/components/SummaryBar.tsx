@@ -10,6 +10,10 @@ const PILL_CONFIG: Record<ScenarioStatus, { label: string; color: string }> = {
     label: "Blocked",
     color: "bg-guardz-green/20 text-guardz-green",
   },
+  mitigated: {
+    label: "Mitigated",
+    color: "bg-guardz-amber/20 text-guardz-amber",
+  },
   completed: {
     label: "Completed",
     color: "bg-guardz-teal-green/20 text-guardz-bright-green",

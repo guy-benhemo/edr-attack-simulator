@@ -9,7 +9,7 @@
 
   /* Guardz Primary Colors */
   --color-guardz-purple: #654fe8;
-  --color-guardz-green: #4fe882;
+  --color-guardz-green: #00e48a;
 
   /* Guardz Secondary Colors */
   --color-guardz-dark-purple: #2f2472;
@@ -23,6 +23,8 @@
   --color-guardz-light-purple: #a289fc;
   --color-guardz-lavender: #f1edff;
   --color-guardz-off-white: #faf9f6;
+  --color-guardz-amber: #f59e0b;
+  --color-guardz-dark-amber: #b45309;
   --color-guardz-dark-red: #b0284f;
   --color-guardz-pink: #fc5281;
 }

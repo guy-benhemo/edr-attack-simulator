@@ -19,17 +19,17 @@ export const INITIAL_SCENARIOS: Scenario[] = [
   },
   {
     id: "amsi-patch",
-    name: "AMSI Memory Patch",
+    name: "AMSI Reflection Probe",
     description:
-      "Attempts to patch AMSI in-memory via .NET Reflection, nullifying the AmsiContext field.",
+      "Resolves AMSI internals via .NET Reflection to inspect the AmsiContext field, triggering behavioral detection.",
     category: "Behavioral",
     status: "ready",
   },
   {
     id: "lsass-minidump",
-    name: "LSASS Minidump",
+    name: "LSASS Handle Access",
     description:
-      "Uses MiniDumpWriteDump via P/Invoke to dump LSASS process memory to a temp file, then deletes it.",
+      "Attempts to open a handle to the LSASS process, triggering credential access detection without memory dumping.",
     category: "Credential Access",
     status: "ready",
   },
@@ -37,7 +37,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     id: "reverse-shell",
     name: "Reverse Shell (TCP)",
     description:
-      "Opens a TCP socket with StreamReader/Writer and Invoke-Expression, simulating a real C2 callback pattern.",
+      "Opens a TCP socket to localhost with StreamWriter, simulating a C2 callback pattern without full shell execution.",
     category: "Exfiltration",
     status: "ready",
   },
@@ -77,7 +77,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     id: "bloodhound-recon",
     name: "BloodHound AD Recon",
     description:
-      "Emulates BloodHound execution with Invoke-BloodHound -CollectionMethod All, triggering AD reconnaissance detection.",
+      "Emulates BloodHound AD enumeration commands and queries the domain controller, triggering reconnaissance detection.",
     category: "Reconnaissance",
     status: "ready",
   },

@@ -16,6 +16,11 @@ const STATUS_CONFIG: Record<
     bg: "bg-guardz-green/20",
     text: "text-guardz-green",
   },
+  mitigated: {
+    label: "Mitigated",
+    bg: "bg-guardz-amber/20",
+    text: "text-guardz-amber",
+  },
   completed: {
     label: "Completed",
     bg: "bg-guardz-teal-green/20",

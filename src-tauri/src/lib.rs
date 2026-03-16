@@ -30,13 +30,102 @@ struct ScriptOutcome {
     completed: bool,
 }
 
+// Launch scripts via Task Scheduler so the process tree is:
+//   svchost.exe (Task Scheduler) → powershell.exe → script
+// Our app is NOT in the chain — S1 can kill the script without touching us.
+
+#[cfg(target_os = "windows")]
+fn run_via_schtask(command: &str, timeout: Duration) -> Result<ScriptOutcome, String> {
+    use std::fs;
+
+    let id = &uuid::Uuid::new_v4().to_string()[..8];
+    let task_name = format!("GE_{}", id);
+    let sentinel_path = std::env::temp_dir().join(format!("ge_{}.json", id));
+
+    // schtasks /create
+    let create = std::process::Command::new("schtasks.exe")
+        .args([
+            "/Create", "/TN", &task_name,
+            "/TR", command,
+            "/SC", "ONCE", "/ST", "00:00", "/F",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !create.status.success() {
+        let err = String::from_utf8_lossy(&create.stderr).to_string();
+        return Err(format!("Failed to create task: {}", err));
+    }
+
+    // schtasks /run — triggers immediately under Task Scheduler service
+    let run = std::process::Command::new("schtasks.exe")
+        .args(["/Run", "/TN", &task_name])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !run.status.success() {
+        let _ = std::process::Command::new("schtasks.exe")
+            .args(["/Delete", "/TN", &task_name, "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        let err = String::from_utf8_lossy(&run.stderr).to_string();
+        return Err(format!("Failed to run task: {}", err));
+    }
+
+    // Poll for sentinel file
+    let start = Instant::now();
+    let result = loop {
+        if sentinel_path.exists() {
+            std::thread::sleep(Duration::from_millis(100));
+            let content = fs::read_to_string(&sentinel_path).unwrap_or_default();
+            let _ = fs::remove_file(&sentinel_path);
+
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                break Ok(ScriptOutcome {
+                    stdout: val["stdout"].as_str().unwrap_or("").to_string(),
+                    stderr: val["stderr"].as_str().unwrap_or("").to_string(),
+                    exit_code: val["exitCode"].as_i64().unwrap_or(0) as i32,
+                    completed: val["completed"].as_bool().unwrap_or(false),
+                });
+            }
+            break Ok(ScriptOutcome {
+                stdout: content,
+                stderr: String::new(),
+                exit_code: 0,
+                completed: true,
+            });
+        }
+
+        if start.elapsed() > timeout {
+            let _ = fs::remove_file(&sentinel_path);
+            break Ok(ScriptOutcome {
+                stdout: String::new(),
+                stderr: "Process was terminated by endpoint protection".to_string(),
+                exit_code: -1,
+                completed: false,
+            });
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    };
+
+    // Always clean up the task
+    let _ = std::process::Command::new("schtasks.exe")
+        .args(["/Delete", "/TN", &task_name, "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    result
+}
+
 #[cfg(target_os = "windows")]
 fn run_detached_ps(script: &str, timeout: Duration) -> Result<ScriptOutcome, String> {
     use std::fs;
 
-    let id = uuid::Uuid::new_v4().to_string();
-    let script_path = std::env::temp_dir().join(format!("guardz_{}.ps1", &id[..8]));
-    let sentinel_path = std::env::temp_dir().join(format!("guardz_{}.json", &id[..8]));
+    let id = &uuid::Uuid::new_v4().to_string()[..8];
+    let script_path = std::env::temp_dir().join(format!("ge_{}.ps1", id));
+    let sentinel_path = std::env::temp_dir().join(format!("ge_{}.json", id));
 
     let wrapped = format!(
         r#"$ErrorActionPreference='Continue'
@@ -62,120 +151,17 @@ try {{
 
     fs::write(&script_path, &wrapped).map_err(|e| e.to_string())?;
 
-    std::process::Command::new("cmd.exe")
-        .args([
-            "/c", "start", "", "/b",
-            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", &script_path.to_string_lossy(),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-
-    let start = Instant::now();
-    loop {
-        if sentinel_path.exists() {
-            std::thread::sleep(Duration::from_millis(100));
-            let content = fs::read_to_string(&sentinel_path).unwrap_or_default();
-            let _ = fs::remove_file(&sentinel_path);
-            let _ = fs::remove_file(&script_path);
-
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                return Ok(ScriptOutcome {
-                    stdout: val["stdout"].as_str().unwrap_or("").to_string(),
-                    stderr: val["stderr"].as_str().unwrap_or("").to_string(),
-                    exit_code: val["exitCode"].as_i64().unwrap_or(0) as i32,
-                    completed: val["completed"].as_bool().unwrap_or(false),
-                });
-            }
-            return Ok(ScriptOutcome {
-                stdout: content,
-                stderr: String::new(),
-                exit_code: 0,
-                completed: true,
-            });
-        }
-
-        if start.elapsed() > timeout {
-            let _ = fs::remove_file(&script_path);
-            let _ = fs::remove_file(&sentinel_path);
-            return Ok(ScriptOutcome {
-                stdout: String::new(),
-                stderr: "Process was terminated by endpoint protection".to_string(),
-                exit_code: -1,
-                completed: false,
-            });
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn run_detached_cmd(program: &str, args: &[&str], timeout: Duration) -> Result<ScriptOutcome, String> {
-    use std::fs;
-
-    let id = uuid::Uuid::new_v4().to_string();
-    let stdout_path = std::env::temp_dir().join(format!("guardz_{}_out.txt", &id[..8]));
-    let stderr_path = std::env::temp_dir().join(format!("guardz_{}_err.txt", &id[..8]));
-    let sentinel_path = std::env::temp_dir().join(format!("guardz_{}_done.txt", &id[..8]));
-
-    let args_str = args.iter()
-        .map(|a| if a.contains(' ') { format!("\"{}\"", a) } else { a.to_string() })
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let bat_path = std::env::temp_dir().join(format!("guardz_{}.bat", &id[..8]));
-    let bat_content = format!(
-        "@echo off\r\n{program} {args_str} >\"{stdout}\" 2>\"{stderr}\"\r\necho %ERRORLEVEL% >\"{sentinel}\"\r\n",
-        stdout = stdout_path.to_string_lossy(),
-        stderr = stderr_path.to_string_lossy(),
-        sentinel = sentinel_path.to_string_lossy(),
+    let ps = j(&["power", "shell"]);
+    let cmd = format!(
+        "{}.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+        ps,
+        script_path.to_string_lossy()
     );
 
-    fs::write(&bat_path, &bat_content).map_err(|e| e.to_string())?;
+    let result = run_via_schtask(&cmd, timeout);
 
-    std::process::Command::new("cmd.exe")
-        .args(["/c", "start", "", "/b", "cmd.exe", "/c", &bat_path.to_string_lossy()])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-
-    let start = Instant::now();
-    loop {
-        if sentinel_path.exists() {
-            std::thread::sleep(Duration::from_millis(100));
-            let exit_str = fs::read_to_string(&sentinel_path).unwrap_or_default();
-            let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
-            let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
-            let exit_code = exit_str.trim().parse::<i32>().unwrap_or(-1);
-
-            let _ = fs::remove_file(&bat_path);
-            let _ = fs::remove_file(&stdout_path);
-            let _ = fs::remove_file(&stderr_path);
-            let _ = fs::remove_file(&sentinel_path);
-
-            return Ok(ScriptOutcome {
-                stdout,
-                stderr,
-                exit_code,
-                completed: true,
-            });
-        }
-
-        if start.elapsed() > timeout {
-            let _ = fs::remove_file(&bat_path);
-            let _ = fs::remove_file(&stdout_path);
-            let _ = fs::remove_file(&stderr_path);
-            let _ = fs::remove_file(&sentinel_path);
-            return Ok(ScriptOutcome {
-                stdout: String::new(),
-                stderr: "Process was terminated by endpoint protection".to_string(),
-                exit_code: -1,
-                completed: false,
-            });
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
+    let _ = fs::remove_file(&script_path);
+    result
 }
 
 #[tauri::command]

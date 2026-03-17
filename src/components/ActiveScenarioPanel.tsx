@@ -1,5 +1,14 @@
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { Scenario } from "../types";
 import { getOutcome } from "../utils/verdict";
+
+const executingMessages = [
+  "Simulating threat scenario…",
+  "Triggering suspicious activity…",
+  "Monitoring endpoint telemetry…",
+  "Emulating attacker behavior…",
+];
 
 interface ActiveScenarioPanelProps {
   scenario: Scenario;
@@ -16,6 +25,19 @@ export default function ActiveScenarioPanel({
   const outcome = getOutcome(scenario.status);
   const showResult = outcome !== "pending" && !isRunning;
 
+  const [msgIndex, setMsgIndex] = useState(() => Math.floor(Math.random() * 4));
+
+  useEffect(() => {
+    if (!isRunning) {
+      setMsgIndex(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setMsgIndex((prev) => (prev + 1) % executingMessages.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
   return (
     <div className="flex max-w-xl flex-col items-center gap-8 px-8 text-center animate-fade-in">
       <div className="text-sm font-medium tracking-widest text-guardz-medium-gray uppercase">
@@ -24,17 +46,26 @@ export default function ActiveScenarioPanel({
 
       <h2 className="text-headline-04 text-white">{scenario.name}</h2>
 
-      <p className="text-body-01 text-guardz-light-gray">
-        {scenario.question}
-      </p>
+      <p className="text-body-01 text-guardz-light-gray">{scenario.question}</p>
 
       {isRunning && (
         <div className="flex w-full flex-col items-center gap-4">
           <div className="relative h-1 w-64 overflow-hidden rounded-full bg-white/5">
             <div className="absolute inset-0 rounded-full bg-guardz-purple animate-scan-line" />
           </div>
-          <span className="text-sm text-guardz-light-purple">
-            Executing scenario...
+          <span className="relative inline-flex h-5 items-center justify-center overflow-hidden text-sm text-guardz-light-purple">
+            <AnimatePresence mode="popLayout">
+              <motion.span
+                key={msgIndex}
+                initial={{ y: -20, filter: "blur(6px)", opacity: 0 }}
+                animate={{ y: 0, filter: "blur(0px)", opacity: 1 }}
+                exit={{ y: 20, filter: "blur(6px)", opacity: 0 }}
+                transition={{ duration: 0.4 }}
+                className="inline-block whitespace-nowrap"
+              >
+                {executingMessages[msgIndex]}
+              </motion.span>
+            </AnimatePresence>
           </span>
         </div>
       )}

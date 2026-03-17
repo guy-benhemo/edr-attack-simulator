@@ -118,7 +118,7 @@ fn spawn_mock_runner() -> Result<(), String> {
             if let Ok(scenarios) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
                 for scenario in &scenarios {
                     let id = scenario["id"].as_str().unwrap_or("");
-                    std::thread::sleep(Duration::from_millis(800));
+                    std::thread::sleep(Duration::from_millis(8000));
                     let result = serde_json::json!({
                         "scenarioId": id,
                         "status": "completed",
@@ -126,7 +126,7 @@ fn spawn_mock_runner() -> Result<(), String> {
                         "stdout": "mock output (macOS dev mode)",
                         "stderr": "",
                         "exitCode": 0,
-                        "durationMs": 800
+                        "durationMs": 8000
                     });
                     let result_file = results_dir().join(format!("{}.json", id));
                     let _ = std::fs::write(&result_file, result.to_string());

@@ -27,7 +27,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     shortName: "AMSI Probe",
     question: "Can an attacker bypass Windows anti-malware scanning?",
     description:
-      "Resolves AMSI internals via .NET Reflection to inspect the AmsiContext field, triggering behavioral detection.",
+      "Resolves AMSI internals via .NET Reflection using file-based execution with string fragmentation to bypass script scanning.",
     category: "Behavioral",
     status: "ready",
   },
@@ -37,7 +37,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     shortName: "LSASS Access",
     question: "Can an attacker dump credentials from memory?",
     description:
-      "Attempts to open a handle to the LSASS process, triggering credential access detection without memory dumping.",
+      "Spawns credential harvesting processes (procdump, comsvcs MiniDump, mimikatz patterns) via batch file execution.",
     category: "Credential Access",
     status: "ready",
   },
@@ -57,7 +57,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     shortName: "Sched Task",
     question: "Can an attacker create persistent backdoor access?",
     description:
-      "Creates a scheduled task with a benign echo command, then immediately deletes it.",
+      "Creates persistence entries via registry Run keys, scheduled tasks, WMI subscriptions, and startup folder — all self-cleaning.",
     category: "Persistence",
     status: "ready",
   },
@@ -87,7 +87,7 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     shortName: "LOLBin DL",
     question: "Can an attacker download files using trusted system tools?",
     description:
-      "Uses certutil -urlcache to download from a dummy URL — a classic Living-off-the-Land technique.",
+      "Uses curl.exe to silently download from a dummy URL — a Living-off-the-Land technique using a trusted system binary.",
     category: "LOLBin",
     status: "ready",
   },

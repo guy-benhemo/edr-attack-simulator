@@ -119,15 +119,6 @@ export default function AppShell() {
     if (state.phase !== "executing" || state.runQueue.length === 0) return;
     if (state.currentIndex !== 0) return;
 
-    try {
-      await invoke("prepare_scenarios", { scenarioIds: state.runQueue });
-      await invoke("launch_runner");
-    } catch (err) {
-      console.error("Failed to launch runner:", err);
-      dispatch({ type: "SHOW_RESULTS" });
-      return;
-    }
-
     for (let i = 0; i < state.runQueue.length; i++) {
       if (abortRef.current) return;
 
@@ -135,49 +126,22 @@ export default function AppShell() {
       dispatch({ type: "SCENARIO_EXECUTING", id: scenarioId });
 
       const startTime = Date.now();
-      let result: ExecutionResult | null = null;
+      let result: ExecutionResult;
 
-      while (!result) {
-        if (abortRef.current) return;
-
-        try {
-          result = await invoke<ExecutionResult | null>("poll_result", {
-            scenarioId,
-          });
-        } catch {
-          // poll failed, try again
-        }
-
-        if (!result) {
-          const isDone = await invoke<boolean>("check_runner_done");
-          if (isDone) {
-            result = {
-              scenarioId,
-              status: "mitigated",
-              message: "Script was terminated by endpoint protection",
-              stdout: "",
-              stderr: "",
-              exitCode: -1,
-              durationMs: Date.now() - startTime,
-            };
-            break;
-          }
-
-          if (Date.now() - startTime > 30000) {
-            result = {
-              scenarioId,
-              status: "mitigated",
-              message: "Timed out waiting for result",
-              stdout: "",
-              stderr: "",
-              exitCode: -1,
-              durationMs: 30000,
-            };
-            break;
-          }
-
-          await sleep(300);
-        }
+      try {
+        result = await invoke<ExecutionResult>("execute_scenario", {
+          scenarioId,
+        });
+      } catch (err) {
+        result = {
+          scenarioId,
+          status: "failed",
+          message: String(err),
+          stdout: "",
+          stderr: "",
+          exitCode: -1,
+          durationMs: Date.now() - startTime,
+        };
       }
 
       const elapsed = Date.now() - startTime;

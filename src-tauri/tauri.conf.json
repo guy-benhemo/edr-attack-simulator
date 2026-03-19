@@ -23,6 +23,7 @@
     }
   },
   "bundle": {
+    "publisher": "Guardz",
     "active": true,
     "targets": "all",
     "resources": {

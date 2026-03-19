@@ -30,20 +30,25 @@ export default function ResultsScreen({
   return (
     <div className="flex h-screen flex-col">
       <div className="flex shrink-0 flex-col items-center gap-6 border-b border-white/10 px-8 py-10 animate-fade-in">
-        <ScoreRing executed={executed} total={total} />
+        <ScoreRing executed={stopped} total={total} />
         <div className="flex flex-col items-center gap-2">
           <h2 className="text-headline-04 text-white">
-            {executed}/{total} Scenarios Executed
+            {stopped}/{total} Attacks Blocked
           </h2>
-          {stopped > 0 && (
-            <p className="text-sm text-guardz-light-purple">
-              {stopped} scenario{stopped > 1 ? "s" : ""} stopped by endpoint
+          {executed > 0 && (
+            <p className="text-sm text-guardz-pink">
+              {executed} scenario{executed > 1 ? "s" : ""} bypassed endpoint
               protection
             </p>
           )}
+          {stopped === total && (
+            <p className="text-sm text-guardz-green">
+              All attacks were detected and blocked
+            </p>
+          )}
           <p className="mt-1 max-w-md text-center text-xs text-guardz-medium-gray">
-            Check your SentinelOne console to verify which attacks were detected
-            and logged.
+            Review undetected scenarios to identify protection gaps in your
+            endpoint security.
           </p>
         </div>
         <div className="flex gap-3">

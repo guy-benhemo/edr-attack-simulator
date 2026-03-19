@@ -13,8 +13,8 @@ export default function WelcomeScreen({
         <img src="/logo.png" alt="Guardz" className="h-8" />
         <h1 className="text-headline-03 text-white">S1 Detection Validation</h1>
         <p className="max-w-lg text-center text-body-03 font-normal text-guardz-light-gray">
-          Validate your SentinelOne endpoint protection by running safe,
-          simulated attack scenarios.
+          Test your endpoint protection against real attack techniques.
+          Identify gaps before attackers do.
         </p>
       </div>
 

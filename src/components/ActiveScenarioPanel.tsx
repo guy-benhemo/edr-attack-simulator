@@ -4,10 +4,10 @@ import { Scenario } from "../types";
 import { getOutcome } from "../utils/verdict";
 
 const executingMessages = [
-  "Simulating threat scenario…",
-  "Triggering suspicious activity…",
-  "Monitoring endpoint telemetry…",
-  "Emulating attacker behavior…",
+  "Executing attack technique…",
+  "Testing endpoint defenses…",
+  "Checking if protection holds…",
+  "Probing for security gaps…",
 ];
 
 interface ActiveScenarioPanelProps {
@@ -75,37 +75,37 @@ export default function ActiveScenarioPanel({
           <div
             className={`flex h-16 w-16 items-center justify-center rounded-full ${
               outcome === "executed"
-                ? "bg-guardz-green/15"
+                ? "bg-guardz-pink/15"
                 : outcome === "stopped"
-                  ? "bg-guardz-light-purple/15"
+                  ? "bg-guardz-green/15"
                   : "bg-guardz-pink/15"
             }`}
           >
             <span
               className={`text-2xl ${
                 outcome === "executed"
-                  ? "text-guardz-green"
+                  ? "text-guardz-pink"
                   : outcome === "stopped"
-                    ? "text-guardz-light-purple"
+                    ? "text-guardz-green"
                     : "text-guardz-pink"
               }`}
             >
-              {outcome === "executed" ? "✓" : outcome === "stopped" ? "⊘" : "✕"}
+              {outcome === "executed" ? "⚠" : outcome === "stopped" ? "✓" : "✕"}
             </span>
           </div>
           <span
             className={`text-headline-05 font-bold tracking-wider ${
               outcome === "executed"
-                ? "text-guardz-green"
+                ? "text-guardz-pink"
                 : outcome === "stopped"
-                  ? "text-guardz-light-purple"
+                  ? "text-guardz-green"
                   : "text-guardz-pink"
             }`}
           >
             {outcome === "executed"
-              ? "EXECUTED"
+              ? "UNDETECTED"
               : outcome === "stopped"
-                ? "STOPPED"
+                ? "PROTECTED"
                 : "ERROR"}
           </span>
           {scenario.durationMs !== undefined && (

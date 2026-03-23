@@ -8,13 +8,12 @@ export default function WelcomeScreen({
   onSelectIndividual,
 }: WelcomeScreenProps) {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-8 px-8">
+    <div className="relative flex h-screen flex-col items-center justify-center gap-8 px-8">
       <div className="flex flex-col items-center gap-4">
-        <img src="/logo.png" alt="Guardz" className="h-8" />
-        <h1 className="text-headline-03 text-white">S1 Detection Validation</h1>
+        <h1 className="text-headline-03 text-white">EDR Attack Simulator</h1>
         <p className="max-w-lg text-center text-body-03 font-normal text-guardz-light-gray">
-          Test your endpoint protection against real attack techniques.
-          Identify gaps before attackers do.
+          Test your endpoint protection against real attack techniques. Identify
+          gaps before attackers do.
         </p>
       </div>
 
@@ -31,6 +30,17 @@ export default function WelcomeScreen({
         >
           Or select individual tests
         </button>
+      </div>
+
+      <div className="absolute bottom-6 flex items-center gap-1.5 text-sm text-guardz-light-gray">
+        <span>Powered by</span>
+        <a
+          href="https://www.guardz.com"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img src="/logo.png" alt="Guardz" className="h-5" />
+        </a>
       </div>
     </div>
   );

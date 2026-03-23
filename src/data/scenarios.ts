@@ -72,16 +72,6 @@ export const INITIAL_SCENARIOS: Scenario[] = [
     status: "ready",
   },
   {
-    id: "macro-tamper",
-    name: "Office Macro Security Tamper",
-    shortName: "Macro Tamper",
-    question: "Can an attacker disable Office macro protections?",
-    description:
-      "Modifies Office VBA macro security level in the registry, then immediately reverts the change.",
-    category: "Behavioral",
-    status: "ready",
-  },
-  {
     id: "lotl-download",
     name: "LOLBin File Download",
     shortName: "LOLBin DL",

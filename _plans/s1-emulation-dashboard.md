@@ -2,7 +2,7 @@
 
 ## Context
 
-This app is a Guardz-branded sales enablement tool that lets a sales engineer demo SentinelOne's detection capabilities live. The current state is a fresh Tauri 2 + React 19 scaffold with a single `greet` command. We need to replace it with a dark-mode dashboard of 10 threat scenario cards, each triggering a silent shell command via the Rust backend.
+This app is a Guardz-branded sales enablement tool that lets a sales engineer demo SentinelOne's detection capabilities live. The current state is a fresh Tauri 2 + React 19 scaffold with a single `greet` command. We need to replace it with a dark-mode dashboard of 9 threat scenario cards, each triggering a silent shell command via the Rust backend.
 
 The Guardz design system (colors + typography) is already configured in `src/styles/globals.css`.
 
@@ -26,19 +26,18 @@ The Guardz design system (colors + typography) is already configured in `src/sty
 - On non-Windows (for dev), return mock results so UI can be developed on macOS
 - Register: `tauri::generate_handler![execute_scenario, reset_scenarios]`
 
-**The 10 scenarios** (all use `std::process::Command` directly — no shell plugin needed):
+**The 9 scenarios** (all use `std::process::Command` directly — no shell plugin needed):
 | # | ID | What it does |
 |---|-----|-------------|
 | 1 | certutil-dump | `certutil -encode` on a dummy file, simulating SAM/SYSTEM data extraction via system tool |
 | 2 | rdp-enable | `reg add` to enable RDP (`fDenyTSConnections = 0`), then immediately revert with `reg add` |
-| 3 | amsi-patch | PowerShell that attempts to patch AMSI in-memory via Reflection (`AmsiContext` field null-out) |
-| 4 | lsass-minidump | PowerShell using `MiniDumpWriteDump` via P/Invoke to dump lsass to a temp file, then delete |
-| 5 | reverse-shell | PowerShell opening a TCP `System.Net.Sockets.TcpClient` to a non-routable address (simulated C2 connect, immediately aborted) |
-| 6 | persistence-task | `schtasks /create` with a benign echo command, then immediate `schtasks /delete` |
-| 7 | base64-exec | `powershell -EncodedCommand <base64 of harmless whoami>` — encoded execution to bypass text monitoring |
-| 8 | macro-tamper | `reg add` to set `HKCU\...\Security\Trusted Locations` / VBA macro security level, then revert |
-| 9 | lotl-download | `certutil -urlcache -split -f` downloading from a dummy URL (Living-off-the-Land file download) |
-| 10 | keylogger-sim | PowerShell calling `GetAsyncKeyState` via P/Invoke in a short loop, simulating keyboard API access |
+| 3 | amsi-patch | Sets `amsiInitFailed` via .NET Reflection with `[String]::Join` obfuscation to bypass AV |
+| 4 | lsass-minidump | Spawns procdump, comsvcs MiniDump, mimikatz patterns via batch files |
+| 5 | reverse-shell | Opens TCP socket to localhost with StreamReader/StreamWriter simulating C2 callback |
+| 6 | persistence-task | Registry Run keys, schtasks, WMI subscriptions, and startup folder — all self-cleaning |
+| 7 | base64-exec | Encodes reverse shell pattern (TCP socket + whoami) and runs via `powershell -EncodedCommand` |
+| 8 | lotl-download | `curl.exe` downloading from a dummy URL — LOLBin technique |
+| 9 | bloodhound-recon | Emulates `Invoke-BloodHound` AD enumeration commands |
 
 ---
 
@@ -51,7 +50,7 @@ The Guardz design system (colors + typography) is already configured in `src/sty
 - `ExecutionResult`: matches Rust struct
 
 **Create** `src/data/scenarios.ts`:
-- Export `INITIAL_SCENARIOS: Scenario[]` — the 10 scenarios with `status: "ready"`
+- Export `INITIAL_SCENARIOS: Scenario[]` — the 9 scenarios with `status: "ready"`
 
 ---
 

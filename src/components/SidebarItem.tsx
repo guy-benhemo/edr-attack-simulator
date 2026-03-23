@@ -37,7 +37,13 @@ export default function SidebarItem({
               : "bg-white/5 text-guardz-medium-gray"
         }`}
       >
-        {isPast ? (outcome === "executed" ? "⚠" : outcome === "stopped" ? "✓" : "✕") : index + 1}
+        {isPast
+          ? outcome === "executed"
+            ? "⚠"
+            : outcome === "stopped"
+              ? "✓"
+              : "✕"
+          : index + 1}
       </div>
 
       <span
@@ -65,7 +71,11 @@ export default function SidebarItem({
                 : "text-guardz-pink"
           }`}
         >
-          {outcome === "executed" ? "Gap" : outcome === "stopped" ? "Blocked" : "Error"}
+          {outcome === "executed"
+            ? "Danger"
+            : outcome === "stopped"
+              ? "Blocked"
+              : "Error"}
         </span>
       )}
     </div>

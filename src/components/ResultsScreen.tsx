@@ -22,18 +22,18 @@ export default function ResultsScreen({
   const executed = ranScenarios.filter(
     (s) => getOutcome(s.status) === "executed",
   ).length;
-  const stopped = ranScenarios.filter(
-    (s) => getOutcome(s.status) === "stopped",
+  const protected_ = ranScenarios.filter(
+    (s) => getOutcome(s.status) === "protected",
   ).length;
   const total = ranScenarios.length;
 
   return (
     <div className="flex h-screen flex-col">
       <div className="flex shrink-0 flex-col items-center gap-6 border-b border-white/10 px-8 py-10 animate-fade-in">
-        <ScoreRing executed={stopped} total={total} />
+        <ScoreRing executed={protected_} total={total} />
         <div className="flex flex-col items-center gap-2">
           <h2 className="text-headline-04 text-white">
-            {stopped}/{total} Attacks Blocked
+            {protected_}/{total} Attacks Blocked
           </h2>
           {executed > 0 && (
             <p className="text-sm text-guardz-pink">
@@ -41,7 +41,7 @@ export default function ResultsScreen({
               protection
             </p>
           )}
-          {stopped === total && (
+          {protected_ === total && (
             <p className="text-sm text-guardz-green">
               All attacks were detected and blocked
             </p>

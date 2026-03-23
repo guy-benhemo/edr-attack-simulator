@@ -13,9 +13,7 @@ export default function ResultRow({ scenario, index }: ResultRowProps) {
 
   const badgeConfig = {
     executed: { label: "Undetected", style: "bg-guardz-pink/15 text-guardz-pink" },
-    stopped: { label: "Protected", style: "bg-guardz-green/15 text-guardz-green" },
-    error: { label: "Error", style: "bg-guardz-pink/15 text-guardz-pink" },
-    pending: { label: "Pending", style: "bg-white/10 text-white/50" },
+    protected: { label: "Protected", style: "bg-guardz-green/15 text-guardz-green" },
   }[outcome];
 
   return (

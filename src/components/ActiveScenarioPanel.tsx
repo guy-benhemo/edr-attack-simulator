@@ -23,7 +23,7 @@ export default function ActiveScenarioPanel({
 }: ActiveScenarioPanelProps) {
   const isRunning = scenario.status === "executing";
   const outcome = getOutcome(scenario.status);
-  const showResult = outcome !== "pending" && !isRunning;
+  const showResult = !isRunning && scenario.status !== "ready";
 
   const [msgIndex, setMsgIndex] = useState(() => Math.floor(Math.random() * 4));
 
@@ -76,37 +76,27 @@ export default function ActiveScenarioPanel({
             className={`flex h-16 w-16 items-center justify-center rounded-full ${
               outcome === "executed"
                 ? "bg-guardz-pink/15"
-                : outcome === "stopped"
-                  ? "bg-guardz-green/15"
-                  : "bg-guardz-pink/15"
+                : "bg-guardz-green/15"
             }`}
           >
             <span
               className={`text-2xl ${
                 outcome === "executed"
                   ? "text-guardz-pink"
-                  : outcome === "stopped"
-                    ? "text-guardz-green"
-                    : "text-guardz-pink"
+                  : "text-guardz-green"
               }`}
             >
-              {outcome === "executed" ? "⚠" : outcome === "stopped" ? "✓" : "✕"}
+              {outcome === "executed" ? "⚠" : "✓"}
             </span>
           </div>
           <span
             className={`text-headline-05 font-bold tracking-wider ${
               outcome === "executed"
                 ? "text-guardz-pink"
-                : outcome === "stopped"
-                  ? "text-guardz-green"
-                  : "text-guardz-pink"
+                : "text-guardz-green"
             }`}
           >
-            {outcome === "executed"
-              ? "UNDETECTED"
-              : outcome === "stopped"
-                ? "PROTECTED"
-                : "ERROR"}
+            {outcome === "executed" ? "UNDETECTED" : "PROTECTED"}
           </span>
           {scenario.durationMs !== undefined && (
             <span className="text-xs text-guardz-medium-gray">

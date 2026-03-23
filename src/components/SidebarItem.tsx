@@ -29,9 +29,7 @@ export default function SidebarItem({
           isPast
             ? outcome === "executed"
               ? "bg-guardz-pink/20 text-guardz-pink"
-              : outcome === "stopped"
-                ? "bg-guardz-green/20 text-guardz-green"
-                : "bg-guardz-pink/20 text-guardz-pink"
+              : "bg-guardz-green/20 text-guardz-green"
             : isActive
               ? "bg-guardz-purple/20 text-guardz-light-purple"
               : "bg-white/5 text-guardz-medium-gray"
@@ -40,9 +38,7 @@ export default function SidebarItem({
         {isPast
           ? outcome === "executed"
             ? "⚠"
-            : outcome === "stopped"
-              ? "✓"
-              : "✕"
+            : "✓"
           : index + 1}
       </div>
 
@@ -66,16 +62,12 @@ export default function SidebarItem({
           className={`text-xs font-medium ${
             outcome === "executed"
               ? "text-guardz-pink"
-              : outcome === "stopped"
-                ? "text-guardz-green"
-                : "text-guardz-pink"
+              : "text-guardz-green"
           }`}
         >
           {outcome === "executed"
             ? "Danger"
-            : outcome === "stopped"
-              ? "Blocked"
-              : "Error"}
+            : "Blocked"}
         </span>
       )}
     </div>

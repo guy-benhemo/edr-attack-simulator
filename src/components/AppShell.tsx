@@ -24,6 +24,7 @@ type Action =
   | { type: "SCENARIO_COMPLETE"; id: string; result: ExecutionResult }
   | { type: "ADVANCE_NEXT" }
   | { type: "SHOW_RESULTS" }
+  | { type: "RERUN"; queue: string[] }
   | { type: "RESET" };
 
 const initialState: AppState = {
@@ -93,6 +94,14 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, currentIndex: state.currentIndex + 1 };
     case "SHOW_RESULTS":
       return { ...state, phase: "results" };
+    case "RERUN":
+      return {
+        ...state,
+        phase: "executing" as const,
+        scenarios: INITIAL_SCENARIOS,
+        currentIndex: 0,
+        runQueue: action.queue,
+      };
     case "RESET":
       return initialState;
     default:
@@ -197,7 +206,7 @@ export default function AppShell() {
         <ResultsScreen
           scenarios={state.scenarios}
           runQueue={state.runQueue}
-          onRunAgain={() => dispatch({ type: "START_FULL_SCAN" })}
+          onRunAgain={() => dispatch({ type: "RERUN", queue: state.runQueue })}
           onBackToWelcome={() => dispatch({ type: "RESET" })}
         />
       );

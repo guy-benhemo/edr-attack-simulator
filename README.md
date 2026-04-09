@@ -44,7 +44,6 @@ npx tsc --noEmit       # TypeScript check
 - **Frontend**: React 19, TypeScript, Tailwind CSS 4, Framer Motion
 - **Backend**: Rust (Tauri 2)
 - **IPC**: `invoke()` from `@tauri-apps/api/core`
-- **Fonts**: Inter, Red Hat Display
 
 ## IDE Setup
 

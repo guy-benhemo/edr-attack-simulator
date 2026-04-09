@@ -1,6 +1,6 @@
 # EDR Attack Simulator
 
-A desktop application that runs safe, self-cleaning attack emulations against Windows endpoints to validate whether an EDR detects and blocks common threat techniques.
+A Windows desktop application that runs safe, self-cleaning attack emulations against Windows endpoints to validate whether an EDR detects and blocks common threat techniques.
 
 Built with **Tauri 2 + React 19 + TypeScript** (Rust backend, React frontend).
 

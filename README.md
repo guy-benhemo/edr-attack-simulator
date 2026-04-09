@@ -44,7 +44,3 @@ npx tsc --noEmit       # TypeScript check
 - **Frontend**: React 19, TypeScript, Tailwind CSS 4, Framer Motion
 - **Backend**: Rust (Tauri 2)
 - **IPC**: `invoke()` from `@tauri-apps/api/core`
-
-## IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)

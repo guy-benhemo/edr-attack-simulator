@@ -41,10 +41,13 @@ function buildRailSummary(
   total: number,
   blocked: number,
   undetected: Scenario[],
+  errored: number,
 ): string {
   const parts = [
     `${total} ${total === 1 ? "attack" : "attacks"} simulated against ${TARGET_HOST}.`,
-    `${blocked} blocked, ${undetected.length} undetected.`,
+    `${blocked} blocked, ${undetected.length} undetected${
+      errored > 0 ? `, ${errored} could not run` : ""
+    }.`,
   ];
 
   if (undetected.length === 0) {
@@ -106,8 +109,16 @@ export default function ResultsScreen({
 
   const total = ran.length;
   const undetected = ran.filter((s) => getOutcome(s.status) === "executed");
-  const blockedCount = total - undetected.length;
-  const coverage = total > 0 ? Math.round((blockedCount / total) * 100) : 0;
+  const blockedCount = ran.filter(
+    (s) => getOutcome(s.status) === "protected",
+  ).length;
+  const erroredCount = ran.filter(
+    (s) => getOutcome(s.status) === "errored",
+  ).length;
+  /* Attacks that never started say nothing about coverage, so they are kept
+     out of the score rather than counted as blocked. */
+  const tested = blockedCount + undetected.length;
+  const coverage = tested > 0 ? Math.round((blockedCount / tested) * 100) : 0;
 
   const animatedScore = useCountUp(coverage);
   const animatedBlocked = useCountUp(blockedCount);
@@ -115,7 +126,12 @@ export default function ResultsScreen({
 
   const grade = gradeFor(coverage);
   const summary = summaryFor(coverage, undetected.length);
-  const railSummary = buildRailSummary(total, blockedCount, undetected);
+  const railSummary = buildRailSummary(
+    total,
+    blockedCount,
+    undetected,
+    erroredCount,
+  );
 
   const [saveState, setSaveState] = useState<
     "idle" | "working" | "saved" | "error"
@@ -250,7 +266,17 @@ export default function ResultsScreen({
       >
         <StatTile label="Blocked" value={animatedBlocked} />
         <StatTile label="Undetected" value={animatedUndetected} tone="danger" />
-        <StatTile label="Detection Coverage" value={`${animatedScore}%`} />
+        <StatTile
+          label="Detection Coverage"
+          value={`${animatedScore}%`}
+          suffix={
+            erroredCount > 0 ? (
+              <span className="text-[13px] text-guardz-light-gray">
+                {erroredCount} didn&rsquo;t run
+              </span>
+            ) : undefined
+          }
+        />
       </motion.div>
 
       <h3 className="text-subsection-title shrink-0 px-[34px] pt-7 pb-4 text-white">

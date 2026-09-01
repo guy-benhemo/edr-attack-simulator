@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Scenario } from "../types";
-import { getOutcome } from "../utils/verdict";
+import { getOutcome, isSettled } from "../utils/verdict";
 import { TARGET_HOST } from "../data/scenarios";
 import { EASE_OUT } from "../lib/motion";
 import RailLayout from "./RailLayout";
@@ -43,26 +43,21 @@ export default function ExecutionView({
 
   const queued = runQueue.map((id) => scenarios.find((s) => s.id === id)!);
   const currentScenario = queued[currentIndex];
-  const completed = queued.filter(
-    (s) =>
-      s &&
-      (s.status === "completed" ||
-        s.status === "blocked" ||
-        s.status === "mitigated"),
-  );
+  const completed = queued.filter((s) => s && isSettled(s.status));
   const blockedCount = completed.filter(
     (s) => getOutcome(s.status) === "protected",
   ).length;
-  const undetectedCount = completed.length - blockedCount;
+  const undetectedCount = completed.filter(
+    (s) => getOutcome(s.status) === "executed",
+  ).length;
+  const erroredCount = completed.filter(
+    (s) => getOutcome(s.status) === "errored",
+  ).length;
 
   const stepNumber = Math.min(currentIndex + 1, runQueue.length);
   const pct = runQueue.length > 0 ? (completed.length / runQueue.length) * 100 : 0;
 
-  const isVerdict =
-    currentScenario &&
-    (currentScenario.status === "completed" ||
-      currentScenario.status === "blocked" ||
-      currentScenario.status === "mitigated");
+  const isVerdict = currentScenario && isSettled(currentScenario.status);
 
   return (
     <RailLayout
@@ -89,6 +84,12 @@ export default function ExecutionView({
                 <span className="h-1.5 w-1.5 rounded-full bg-guardz-pink" />
                 {undetectedCount} Undetected
               </span>
+              {erroredCount > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white/50" />
+                  {erroredCount} Didn&rsquo;t run
+                </span>
+              )}
             </div>
           }
         />

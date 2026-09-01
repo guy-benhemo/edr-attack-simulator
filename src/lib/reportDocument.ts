@@ -51,7 +51,8 @@ export function buildReportDocument({
         SEVERITY_RANK[getRecommendation(b.id).severity] -
         SEVERITY_RANK[getRecommendation(a.id).severity],
     );
-  const blocked = ran.length - undetected.length;
+  const blocked = ran.filter((s) => getOutcome(s.status) === "protected").length;
+  const errored = ran.filter((s) => getOutcome(s.status) === "errored").length;
 
   const when = new Date().toLocaleString(undefined, {
     dateStyle: "long",
@@ -62,7 +63,11 @@ export function buildReportDocument({
     `**${ran.length} ${ran.length === 1 ? "attack" : "attacks"}** were simulated against ` +
     `**${TARGET_HOST}** (${TARGET_IP}) on ${when}. ` +
     `${blocked} were blocked by the endpoint and ${undetected.length} ran to completion undetected, ` +
-    `giving a detection coverage of **${coverage}%** — grade **${grade}**.\n\n` +
+    `giving a detection coverage of **${coverage}%** — grade **${grade}**.` +
+    (errored > 0
+      ? ` **${errored}** could not be started by the runner and are excluded from the score — they prove nothing about this endpoint.`
+      : "") +
+    `\n\n` +
     `Every attack runs safely and reverts itself. ${summary}`;
 
   const why =
@@ -128,7 +133,11 @@ export function buildReportDocument({
         checks: [
           s.mitreId,
           s.category,
-          getOutcome(s.status) === "executed" ? "Undetected" : "Blocked",
+          getOutcome(s.status) === "executed"
+            ? "Undetected"
+            : getOutcome(s.status) === "errored"
+              ? "Didn't run"
+              : "Blocked",
         ],
       })),
     },

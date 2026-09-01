@@ -1,165 +1,218 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/red-hat-display";
+@import "@fontsource-variable/jetbrains-mono";
 @import "tailwindcss";
 
 @theme {
   --default-font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Red Hat Display Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
 
-  /* Guardz Primary Colors */
+  /* Guardz palette */
   --color-guardz-purple: #654fe8;
-  --color-guardz-green: #00e48a;
-
-  /* Guardz Secondary Colors */
   --color-guardz-dark-purple: #2f2472;
-  --color-guardz-dark-gray: #363844;
   --color-guardz-medium-gray: #686a73;
   --color-guardz-light-gray: #b9b9be;
-  --color-guardz-cream: #eae8dc;
-  --color-guardz-teal-green: #00aa67;
-  --color-guardz-bright-green: #00d782;
-  --color-guardz-mint-green: #40feae;
   --color-guardz-light-purple: #a289fc;
+  --color-guardz-bright-purple: #b9a6ff;
   --color-guardz-lavender: #f1edff;
-  --color-guardz-off-white: #faf9f6;
-  --color-guardz-dark-red: #b0284f;
   --color-guardz-pink: #fc5281;
+
+  /* Dark system surfaces */
+  --color-base: #0b0819;
+  --color-surface: #15102e;
+  --color-surface-raised: #1b153e;
+  --color-text-soft: #e6e6e6;
+  --color-text-dim: #b9b9be;
 }
 
-/* Guardz Typography Scale */
-
-@utility text-headline-01 {
-  font-family: var(--font-display);
-  font-size: 64px;
-  line-height: 80px;
-  font-weight: 700;
-  letter-spacing: 1px;
+:root {
+  /* The one purple gradient, taken verbatim from guardz.com. */
+  --gradient-purple: linear-gradient(262deg, #654fe8 43.32%, #2f2472 100%);
+  /* Option-tile fills, taken from the technique cards on A2. */
+  --gradient-tile-on: linear-gradient(
+    in oklab 180deg,
+    oklab(54.3% 0.049 -0.214 / 22%) 0%,
+    oklab(70.2% 0.061 -0.153 / 8%) 100%
+  );
+  --gradient-tile-off: linear-gradient(
+    in oklab 180deg,
+    oklab(70.2% 0.061 -0.153 / 6%) 0%,
+    oklab(70.2% 0.061 -0.153 / 2%) 100%
+  );
 }
 
-@utility text-headline-02 {
-  font-family: var(--font-display);
-  font-size: 48px;
-  line-height: 72px;
-  font-weight: 700;
-  letter-spacing: 1px;
+/* ──────────────────────────────────────────────────────────────
+   Buttons — measured off guardz.com (and matching "DS / 04
+   Components"). Flat: radius 8, no shadow, Inter 500, 0.5px
+   tracking. Sizing is applied per instance.
+   ────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter 150ms ease;
 }
 
-@utility text-headline-03 {
-  font-family: var(--font-display);
-  font-size: 40px;
-  line-height: 64px;
-  font-weight: 700;
-  letter-spacing: 1px;
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
-@utility text-headline-04 {
-  font-family: var(--font-display);
-  font-size: 32px;
-  line-height: 48px;
-  font-weight: 700;
-  letter-spacing: 1px;
+.btn:not(:disabled):hover {
+  filter: brightness(1.1);
 }
 
-@utility text-headline-05 {
+.btn-primary {
+  color: #ffffff;
+  background-color: #654fe8;
+  background-image: var(--gradient-purple);
+}
+
+.btn-secondary {
+  color: #ffffff;
+  background-color: #654fe81a;
+  background-image: linear-gradient(
+    262deg,
+    rgba(255, 255, 255, 0.1) 43.32%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  border: 2px solid var(--color-guardz-dark-purple);
+}
+
+.btn-light {
+  color: var(--color-guardz-dark-purple);
+  background-color: #ffffff;
+}
+
+/* ── Typography helpers used across the boards ── */
+
+@utility text-display-hero {
   font-family: var(--font-display);
-  font-size: 26px;
-  line-height: 44px;
+  font-size: 56px;
+  line-height: 60px;
   font-weight: 700;
   letter-spacing: 0.5px;
 }
 
-@utility text-headline-06 {
+@utility text-section-title {
   font-family: var(--font-display);
   font-size: 22px;
-  line-height: 40px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-
-@utility text-headline-07 {
-  font-family: var(--font-display);
-  font-size: 20px;
-  line-height: 32px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-
-@utility text-headline-08 {
-  font-family: var(--font-display);
-  font-size: 16px;
   line-height: 28px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.3px;
 }
 
-@utility text-body-01 {
-  font-family: var(--font-sans);
-  font-size: 20px;
-  line-height: 32px;
-  font-weight: 400;
-  letter-spacing: 1px;
-}
-
-@utility text-body-02 {
-  font-family: var(--font-sans);
+@utility text-subsection-title {
+  font-family: var(--font-display);
   font-size: 18px;
-  line-height: 30px;
+  line-height: 22px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.3px;
 }
 
-@utility text-body-03 {
-  font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 26px;
+/* Scenario name on the execution card (A3–A5). */
+@utility text-card-title {
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 36px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.3px;
 }
 
-@keyframes scan-line {
-  0% { transform: translateX(-100%); opacity: 0; }
-  20% { opacity: 1; }
-  80% { opacity: 1; }
-  100% { transform: translateX(100%); opacity: 0; }
+@utility text-verdict-label {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+@utility text-rail-title {
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 40px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* ── Motion: only the two loops that signal live activity ── */
+
+@keyframes scan-sweep {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
 }
 
 @keyframes dot-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(1.6); }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.7);
+  }
 }
 
-@keyframes verdict-reveal {
-  0% { opacity: 0; transform: scale(0.85); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes ring-fill {
-  from { stroke-dashoffset: var(--ring-circumference); }
-  to { stroke-dashoffset: var(--ring-offset); }
-}
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@utility animate-scan-line {
-  animation: scan-line 2s ease-in-out infinite;
+@utility animate-scan-sweep {
+  animation: scan-sweep 1.8s ease-in-out infinite;
 }
 
 @utility animate-dot-pulse {
   animation: dot-pulse 1.5s ease-in-out infinite;
 }
 
-@utility animate-verdict {
-  animation: verdict-reveal 0.4s ease-out forwards;
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(162, 137, 252, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(162, 137, 252, 0.05) 1px, transparent 1px);
+  background-size: 108px 108px;
 }
 
-@utility animate-ring {
-  animation: ring-fill 1.2s ease-out forwards;
+@utility scrollbar-slim {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(162, 137, 252, 0.25) transparent;
 }
 
-@utility animate-fade-in {
-  animation: fade-in 0.3s ease-out forwards;
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-base);
+  color: var(--color-text-soft);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

@@ -85,6 +85,48 @@ fn reset_scenarios() -> Result<(), String> {
     Ok(())
 }
 
+/// Writes the PDF built in the frontend to a location the user picks.
+/// Returns the saved path, or `None` when the save dialog is dismissed.
+///
+/// This is async and uses the callback form of the dialog on purpose: the
+/// blocking variant deadlocks if it ever lands on the main thread.
+#[tauri::command]
+async fn save_report_pdf(
+    app: tauri::AppHandle,
+    file_name: String,
+    base64_data: String,
+) -> Result<Option<String>, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use tauri_plugin_dialog::DialogExt;
+
+    let bytes = STANDARD
+        .decode(base64_data.as_bytes())
+        .map_err(|e| format!("Could not decode the report: {e}"))?;
+
+    let (tx, mut rx) = tauri::async_runtime::channel(1);
+
+    app.dialog()
+        .file()
+        .add_filter("PDF document", &["pdf"])
+        .set_file_name(&file_name)
+        .save_file(move |path| {
+            let _ = tx.try_send(path);
+        });
+
+    // Outer None: the dialog closed without reporting. Inner None: cancelled.
+    let Some(Some(target)) = rx.recv().await else {
+        return Ok(None);
+    };
+
+    let path = target
+        .into_path()
+        .map_err(|e| format!("Could not resolve the save location: {e}"))?;
+
+    std::fs::write(&path, bytes).map_err(|e| format!("Could not write the report: {e}"))?;
+
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 type ScenarioResult = Result<(String, std::process::Output), String>;
 
 // ── Windows scenario implementations ──
@@ -595,7 +637,12 @@ fn run_bloodhound_recon() -> ScenarioResult {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![execute_scenario, reset_scenarios])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            execute_scenario,
+            reset_scenarios,
+            save_report_pdf
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

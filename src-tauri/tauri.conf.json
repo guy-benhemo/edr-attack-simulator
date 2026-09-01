@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "EDR Attack Simulator",
-        "width": 1280,
+        "width": 1440,
         "height": 900,
+        "minWidth": 1120,
+        "minHeight": 760,
         "resizable": true
       }
     ],

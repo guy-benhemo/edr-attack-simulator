@@ -1,9 +1,15 @@
+import { motion } from "motion/react";
 import { Scenario } from "../types";
+import RailLayout from "./RailLayout";
+import TechniqueCard from "./TechniqueCard";
+import RailStatCard from "./RailStatCard";
+import { listContainer } from "../lib/motion";
 
 interface SelectionScreenProps {
   scenarios: Scenario[];
   selectedIds: string[];
   onToggle: (id: string) => void;
+  onToggleAll: () => void;
   onRunSelected: () => void;
   onBack: () => void;
 }
@@ -12,104 +18,101 @@ export default function SelectionScreen({
   scenarios,
   selectedIds,
   onToggle,
+  onToggleAll,
   onRunSelected,
   onBack,
 }: SelectionScreenProps) {
-  const allSelected = selectedIds.length === scenarios.length;
-
-  function handleSelectAll() {
-    if (allSelected) {
-      scenarios.forEach((s) => {
-        if (selectedIds.includes(s.id)) onToggle(s.id);
-      });
-    } else {
-      scenarios.forEach((s) => {
-        if (!selectedIds.includes(s.id)) onToggle(s.id);
-      });
-    }
-  }
+  const total = scenarios.length;
+  const count = selectedIds.length;
+  const allSelected = count === total;
+  const pct = total > 0 ? (count / total) * 100 : 0;
 
   return (
-    <div className="flex h-screen flex-col">
-      <div className="flex shrink-0 items-center gap-4 border-b border-white/10 px-6 py-4">
+    <RailLayout
+      title={
+        <>
+          Choose the attacks
+          <br />
+          to simulate
+        </>
+      }
+      subtitle="Pick the attacks you want to test against this endpoint, or run the full suite. Every test is safe and self-cleaning."
+      railBottom={
+        <RailStatCard
+          label="Selected"
+          value={`${count} of ${total}`}
+          percent={pct}
+        />
+      }
+      railAction={
         <button
           onClick={onBack}
-          className="cursor-pointer text-guardz-light-gray transition-colors hover:text-white"
+          className="flex cursor-pointer items-center gap-2 text-[13px] leading-4 font-medium text-white/70 transition-colors hover:text-white"
         >
-          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-              clipRule="evenodd"
-            />
+          <svg
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
+          Back to home
         </button>
-        <h2 className="text-headline-07 flex-1 text-white">Select Scenarios</h2>
+      }
+    >
+      <header className="flex shrink-0 items-center justify-between px-[34px] pt-[26px] pb-4">
+        <h2 className="text-section-title text-white">Attack Techniques</h2>
         <button
-          onClick={handleSelectAll}
-          className="cursor-pointer text-sm text-guardz-green transition-colors hover:text-guardz-lavender"
+          onClick={onToggleAll}
+          className="btn btn-secondary gap-2 px-[14px] py-2 text-[13px] leading-4"
         >
-          {allSelected ? "Clear All" : "Select All"}
+          {allSelected ? "Clear all" : "Select all"}
         </button>
-      </div>
+      </header>
 
-      <div className="flex-1 overflow-y-auto">
-        {scenarios.map((scenario) => {
-          const isSelected = selectedIds.includes(scenario.id);
-          return (
-            <button
-              key={scenario.id}
-              onClick={() => onToggle(scenario.id)}
-              className={`flex w-full cursor-pointer items-center gap-4 border-b border-white/5 px-6 py-4 text-left transition-colors hover:bg-white/[0.02] ${
-                isSelected ? "bg-guardz-purple/5" : ""
-              }`}
-            >
-              <div
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
-                  isSelected
-                    ? "border-guardz-green bg-guardz-green"
-                    : "border-white/20 bg-transparent"
-                }`}
-              >
-                {isSelected && (
-                  <svg
-                    className="h-3 w-3 text-black"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                )}
-              </div>
-              <div className="flex flex-1 flex-col gap-0.5">
-                <span className="text-sm font-semibold text-white">
-                  {scenario.name}
-                </span>
-                <span className="text-xs text-guardz-medium-gray">
-                  {scenario.question}
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      <motion.div
+        variants={listContainer}
+        initial="initial"
+        animate="animate"
+        className="scrollbar-slim grid min-h-0 flex-1 auto-rows-min grid-cols-2 content-start gap-[14px] overflow-y-auto px-[34px] pt-[2px] pb-3"
+      >
+        {scenarios.map((scenario) => (
+          <TechniqueCard
+            key={scenario.id}
+            scenario={scenario}
+            selected={selectedIds.includes(scenario.id)}
+            onToggle={() => onToggle(scenario.id)}
+          />
+        ))}
+      </motion.div>
 
-      <div className="flex shrink-0 items-center justify-between border-t border-white/10 px-6 py-4">
-        <span className="text-sm text-guardz-medium-gray">
-          {selectedIds.length} of {scenarios.length} selected
+      <footer className="mt-auto flex shrink-0 items-center justify-between border-t border-[#A289FC33] px-[34px] py-4">
+        <span className="text-[14px] leading-[18px] font-medium text-text-dim">
+          {count} of {total} attacks selected
         </span>
         <button
           onClick={onRunSelected}
-          disabled={selectedIds.length === 0}
-          className="cursor-pointer rounded-lg bg-guardz-green px-6 py-2.5 text-sm font-bold text-black transition-all hover:bg-guardz-green/90 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={count === 0}
+          className="btn btn-primary gap-[9px] px-[26px] py-[13px] text-[15px] leading-[18px]"
         >
-          Run {selectedIds.length > 0 ? `${selectedIds.length} ` : ""}Selected
+          Run {count > 0 ? `${count} ` : ""}Selected
+          <svg
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
         </button>
-      </div>
-    </div>
+      </footer>
+    </RailLayout>
   );
 }

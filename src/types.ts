@@ -7,15 +7,22 @@ export type ScenarioStatus =
   | "failed";
 
 export type ThreatCategory =
-  | "Static Detection"
-  | "Behavioral"
-  | "Reconnaissance"
+  | "Credential Access"
   | "Persistence"
-  | "Exfiltration"
+  | "Defense Evasion"
+  | "Command & Control"
+  | "Execution"
   | "LOLBin"
-  | "Credential Access";
+  | "Discovery";
 
-export type AppPhase = "welcome" | "selecting" | "executing" | "results";
+export type AppPhase =
+  | "welcome"
+  | "selecting"
+  | "executing"
+  | "results"
+  | "compare";
+
+export type Severity = "High" | "Medium" | "Low";
 
 export interface Scenario {
   id: string;
@@ -24,6 +31,7 @@ export interface Scenario {
   question: string;
   description: string;
   category: ThreatCategory;
+  mitreId: string;
   status: ScenarioStatus;
   message?: string;
   stdout?: string;
@@ -41,4 +49,11 @@ export interface ExecutionResult {
   stderr: string;
   exitCode: number;
   durationMs: number;
+}
+
+export interface Recommendation {
+  scenarioId: string;
+  severity: Severity;
+  impact: Severity;
+  action: string;
 }

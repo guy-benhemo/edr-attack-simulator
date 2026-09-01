@@ -3,7 +3,7 @@ import AppShell from "./components/AppShell";
 
 function App() {
   return (
-    <main className="min-h-screen bg-[#12131a]">
+    <main className="h-full bg-[#0B0819]">
       <AppShell />
     </main>
   );

@@ -1,12 +1,6 @@
-import { pdf } from "@react-pdf/renderer";
 import { invoke } from "@tauri-apps/api/core";
-import { ComposerPdf } from "@/server/composer/pdf/ComposerPdf";
 import { isTauri } from "./executor";
-import {
-  buildReportDocument,
-  reportFileName,
-  type ReportInput,
-} from "./reportDocument";
+import type { ReportInput } from "./reportDocument";
 
 export type SaveOutcome =
   | { status: "saved"; path?: string }
@@ -38,14 +32,21 @@ function downloadInBrowser(blob: Blob, fileName: string) {
 }
 
 /**
- * The document is rendered in the browser — this app has no Next.js route to
- * call, so it uses react-pdf's client renderer against the same ComposerPdf
- * component the sales tool renders server-side.
+ * The renderer and the document builder are imported on demand: react-pdf and
+ * the embedded brand fonts are far and away the heaviest thing the app ships,
+ * and nothing needs them until someone actually asks for a report.
  *
  * In the desktop shell the bytes go to Rust, which opens a native save dialog.
  */
 export async function saveReportPdf(input: ReportInput): Promise<SaveOutcome> {
   try {
+    const [{ pdf }, { ComposerPdf }, { buildReportDocument, reportFileName }] =
+      await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/server/composer/pdf/ComposerPdf"),
+        import("./reportDocument"),
+      ]);
+
     const doc = buildReportDocument(input);
     const blob = await pdf(<ComposerPdf doc={doc} />).toBlob();
     const fileName = reportFileName();

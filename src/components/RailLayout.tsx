@@ -29,7 +29,13 @@ export default function RailLayout({
         className="relative flex w-[392px] shrink-0 flex-col justify-between overflow-hidden px-[38px] py-10"
         style={{ backgroundImage: "var(--gradient-purple)" }}
       >
-        <div className="pointer-events-none absolute -top-24 -left-16 h-[340px] w-[340px] rounded-full bg-white/10 blur-[120px]" />
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage:
+              "radial-gradient(360px 360px at 0% 0%, rgba(255,255,255,0.13), rgba(255,255,255,0) 70%)",
+          }}
+        />
 
         <motion.div
           variants={heroContainer}

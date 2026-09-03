@@ -41,6 +41,13 @@
     oklab(54.3% 0.049 -0.214) 43.32%,
     oklab(32.6% 0.029 -0.125) 100%
   );
+  /* The same two stops run left-to-right. guardz.com crossfades to this on
+     hover, which reads as the gradient swinging across the button. */
+  --gradient-purple-hover: linear-gradient(
+    in oklab 90deg,
+    oklab(54.3% 0.049 -0.214) 43.32%,
+    oklab(32.6% 0.029 -0.125) 100%
+  );
   /* Marks, check tiles and pills use the same ramp from 0%. */
   --gradient-mark: linear-gradient(
     in oklab 262deg,
@@ -143,7 +150,9 @@
   letter-spacing: 0.5px;
   white-space: nowrap;
   cursor: pointer;
-  transition: filter 150ms ease;
+  position: relative;
+  isolation: isolate;
+  transition: background-color 500ms ease;
 }
 
 .btn:disabled {
@@ -151,8 +160,35 @@
   opacity: 0.4;
 }
 
-.btn:not(:disabled):hover {
-  filter: brightness(1.1);
+/* Gradients are not interpolable, so the hover fill is a second layer that
+   fades in over the first — the mechanism guardz.com itself uses. The layer
+   sits inside the border box and under the label. */
+.btn-primary::after,
+.btn-secondary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+
+.btn-primary::after {
+  background-image: var(--gradient-purple-hover);
+}
+
+.btn-secondary::after {
+  background-image: var(--gradient-purple);
+}
+
+.btn-primary:not(:disabled):hover::after,
+.btn-secondary:not(:disabled):hover::after {
+  opacity: 1;
+}
+
+.btn-light:not(:disabled):hover {
+  background-color: var(--color-guardz-lavender);
 }
 
 .btn-primary {

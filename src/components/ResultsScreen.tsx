@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { Scenario } from "../types";
 import { getOutcome, GRADE_TONE, type Grade } from "../utils/verdict";
 import { getRecommendation } from "../data/recommendations";
+import { TARGET_HOST } from "../data/scenarios";
 import { saveReportPdf } from "../lib/savePdf";
 import { useCountUp } from "../lib/useCountUp";
 import { listContainer, listItem } from "../lib/motion";
@@ -25,10 +26,34 @@ function gradeFor(score: number): Grade {
   return "F";
 }
 
+/**
+ * A short, factual read-out of what the run actually did. The rail's verdict
+ * line carries the exposure framing; this carries the composition of the run.
+ */
+function runSummary(
+  total: number,
+  blocked: number,
+  bypassed: number,
+  errored: number,
+): string {
+  if (total === 0) return "No attacks were run against this endpoint.";
+  const noun = total === 1 ? "attack" : "attacks";
+  const head = `${total} ${noun} run against ${TARGET_HOST}.`;
+  if (blocked + bypassed === 0) {
+    return `${head} None could be started, so coverage is unknown.`;
+  }
+  const body =
+    bypassed === 0
+      ? ` All ${blocked} were blocked.`
+      : ` ${blocked} blocked, ${bypassed} bypassed protection.`;
+  const tail = errored > 0 ? ` ${errored} never started.` : "";
+  return head + body + tail;
+}
+
 /** The rail sets these on two lines, so the verdict comes back split. */
 function summaryFor(score: number, gaps: number): [string, string] {
-  if (gaps === 0) return ["Full coverage.", "Every technique was blocked."];
-  const tail = `${gaps} technique${gaps > 1 ? "s" : ""} bypassed protection.`;
+  if (gaps === 0) return ["Full coverage.", "Every attack was blocked."];
+  const tail = `${gaps} attack${gaps > 1 ? "s" : ""} bypassed protection.`;
   if (score >= 80) return ["Limited exposure.", tail];
   if (score >= 65) return ["Moderate exposure.", tail];
   return ["High exposure.", tail];
@@ -138,28 +163,39 @@ export default function ResultsScreen({
   return (
     <RailLayout
       heading={
-        <div className="mt-3 flex flex-col gap-2.5">
-          <h1 className="text-report-title text-white">
-            Attack Readiness Report
-          </h1>
-          <p className="text-[14px] leading-[18px] text-[#FFFFFFBF]">SUMMARY</p>
-        </div>
-      }
-      middle={
-        <div className="flex items-center gap-5">
-          <GradeRing score={coverage} grade={grade} color={GRADE_TONE[grade]} />
-          <div className="flex flex-col gap-[5px]">
-            <span
-              className="font-display text-[28px] leading-7 font-bold"
-              style={{ color: GRADE_TONE[grade] }}
-            >
-              {animatedScore}/100
-            </span>
-            <p className="text-[14px] leading-5 text-[#FFFFFFD1]">
-              {headline}
-              <br />
-              {detail}
+        <div className="flex flex-col gap-9">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-report-title text-white">
+              Attack Readiness Report
+            </h1>
+            <p className="text-[15px] leading-[22px] text-[#FFFFFFBF]">
+              {runSummary(
+                total,
+                blockedCount,
+                undetected.length,
+                total - tested,
+              )}
             </p>
+          </div>
+
+          <div className="flex items-center gap-5">
+            <GradeRing
+              score={coverage}
+              grade={grade}
+              color={GRADE_TONE[grade]}
+              size={96}
+            />
+            <div className="flex flex-col gap-1.5">
+              <span className="font-display text-[28px] leading-7 font-bold">
+                <span style={{ color: GRADE_TONE[grade] }}>
+                  {animatedScore}
+                </span>
+                <span className="text-white">/100</span>
+              </span>
+              <p className="text-[15px] leading-5 font-semibold text-white">
+                {headline}
+              </p>
+            </div>
           </div>
         </div>
       }
@@ -240,7 +276,7 @@ export default function ResultsScreen({
               style={{ backgroundImage: "var(--gradient-rec)" }}
               className="rounded-[18px] border border-[#A289FC59] px-[18px] py-6 text-center text-[16px] leading-6 text-text-soft"
             >
-              Every technique in this run was blocked. No remediation needed.
+              Every attack in this run was blocked. No remediation needed.
             </motion.p>
           ) : (
             undetected.map((scenario) => (
@@ -262,7 +298,7 @@ export default function ResultsScreen({
               See how Guardz compares
             </p>
             <p className="text-[18px] leading-[22px] tracking-[0.5px] text-text-dim">
-              Guardz blocked all {total} of these techniques in the same
+              Guardz blocked all {total} of these attacks in the same
               simulation.
             </p>
           </div>
@@ -271,7 +307,7 @@ export default function ResultsScreen({
             onClick={onCompare}
             className="btn btn-primary shrink-0 gap-2 px-5 py-[11px] text-[16px] leading-5"
           >
-            Fix all {undetected.length} gaps
+            Learn more
           </button>
         </div>
       </div>
